@@ -118,69 +118,114 @@ def upload_form():
     error = None
     success = None
     
-    # Get user's previous uploads
-    uploads = Upload.query.filter_by(user_id=current_user.id).order_by(Upload.created_at.desc()).all()
-    
-    if request.method == 'POST':
-        try:
-            # Check if the post request has the file part
-            if 'image' not in request.files:
-                error = "No file part"
-            else:
-                file = request.files['image']
-                
-                # If user does not select file, browser also
-                # submits an empty part without filename
-                if file.filename == '':
-                    error = "No selected file"
+    try:
+        # Get user's previous uploads
+        uploads = Upload.query.filter_by(user_id=current_user.id).order_by(Upload.created_at.desc()).all()
+        
+        if request.method == 'POST':
+            try:
+                # Check if the post request has the file part
+                if 'image' not in request.files:
+                    error = "No file part"
                 else:
-                    if file and allowed_file(file.filename):
-                        # Generate a secure filename
-                        original_filename = secure_filename(file.filename)
-                        filename = f"{uuid.uuid4()}_{original_filename}"
-                        
-                        # Save file locally or to cloud storage
-                        file_path = os.path.join('/tmp', filename)
-                        file.save(file_path)
-                        
-                        # Create upload record in database
-                        new_upload = Upload(
-                            user_id=current_user.id,
-                            filename=filename,
-                            original_filename=original_filename,
-                            status='pending'
-                        )
-                        db.session.add(new_upload)
-                        db.session.commit()
-                        
-                        # Upload to Meshy API (simulated here)
-                        try:
-                            task_id = upload_to_meshy_api(file_path)
-                            if task_id:
-                                # Update record with task ID
-                                new_upload.task_id = task_id
-                                new_upload.status = 'processing'
-                                db.session.commit()
-                                success = "File uploaded successfully! 3D conversion in progress."
-                            else:
-                                error = "Failed to submit the image to the 3D conversion service."
-                        except Exception as e:
-                            logger.error(f"Error calling Meshy API: {e}")
-                            logger.error(traceback.format_exc())
-                            error = f"API Error: {str(e)}"
+                    file = request.files['image']
+                    
+                    # If user does not select file, browser also
+                    # submits an empty part without filename
+                    if file.filename == '':
+                        error = "No selected file"
                     else:
-                        error = "File type not allowed. Please upload a JPG or PNG image."
-        except Exception as e:
-            logger.error(f"Upload error: {e}")
-            logger.error(traceback.format_exc())
-            error = f"An error occurred during upload: {str(e)}"
+                        if file and allowed_file(file.filename):
+                            # Generate a secure filename
+                            original_filename = secure_filename(file.filename)
+                            filename = f"{uuid.uuid4()}_{original_filename}"
+                            
+                            # Create temp directory if it doesn't exist
+                            os.makedirs('/tmp', exist_ok=True)
+                            
+                            # Save file locally
+                            file_path = os.path.join('/tmp', filename)
+                            file.save(file_path)
+                            
+                            # Create upload record in database
+                            new_upload = Upload(
+                                user_id=current_user.id,
+                                filename=filename,
+                                original_filename=original_filename,
+                                status='pending'
+                            )
+                            db.session.add(new_upload)
+                            db.session.commit()
+                            logger.info(f"Created upload record for {filename}")
+                            
+                            # Upload to Meshy API
+                            try:
+                                # Initialize Meshy API first
+                                if not meshy_api.init_api():
+                                    raise Exception("Meshy API initialization failed - API key not found")
+                                
+                                # Set optional processing settings 
+                                settings = {
+                                    "enable_pbr": False,
+                                    "should_remesh": True,
+                                    "should_texture": True
+                                }
+                                
+                                # Upload to Meshy API
+                                task_id, api_error = meshy_api.upload_image_to_3d(file_path, settings)
+                                
+                                if api_error:
+                                    error = f"Meshy API error: {api_error}"
+                                    new_upload.status = 'failed'
+                                    db.session.commit()
+                                elif task_id:
+                                    # Update record with task ID
+                                    new_upload.task_id = task_id
+                                    new_upload.status = 'processing'
+                                    db.session.commit()
+                                    success = "File uploaded successfully! 3D conversion in progress."
+                                else:
+                                    error = "Failed to submit the image to the 3D conversion service."
+                            except Exception as e:
+                                logger.error(f"Error calling Meshy API: {e}")
+                                logger.error(traceback.format_exc())
+                                error = f"API Error: {str(e)}"
+                                new_upload.status = 'failed'
+                                db.session.commit()
+                        else:
+                            error = "File type not allowed. Please upload a JPG or PNG image."
+            except Exception as e:
+                db.session.rollback()
+                logger.error(f"Upload error: {e}")
+                logger.error(traceback.format_exc())
+                error = f"An error occurred during upload: {str(e)}"
+        
+        # Render template with results
+        return render_template_string(
+            UPLOAD_FORM_TEMPLATE, 
+            error=error, 
+            success=success, 
+            uploads=uploads
+        )
     
-    return render_template_string(
-        UPLOAD_FORM_TEMPLATE, 
-        error=error, 
-        success=success, 
-        uploads=uploads
-    )
+    except Exception as e:
+        logger.error(f"Fatal error in upload_form: {e}")
+        logger.error(traceback.format_exc())
+        
+        # Return a basic error page if somethin2g went very wrong
+        error_template = """
+        <!DOCTYPE html>
+        <html>
+        <head><title>Error</title></head>
+        <body>
+            <h1>Application Error</h1>
+            <p>Sorry, an error occurred while processing your request.</p>
+            <p>Error details: {{ error }}</p>
+            <p><a href="/">Return to homepage</a></p>
+        </body>
+        </html>
+        """
+        return render_template_string(error_template, error=str(e)), 500
 
 @upload_bp.route('/check-status/<int:upload_id>')
 @login_required

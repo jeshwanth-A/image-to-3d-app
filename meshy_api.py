@@ -1,38 +1,44 @@
 """
-Meshy API client for 3D model conversion.
-
-This module handles all communication with the Meshy API for converting 
-images to 3D models.
+Meshy API client for converting images to 3D models.
+Based on the provided FastAPI reference implementation.
 """
 import os
-import requests
-import logging
-import json
 import time
 import base64
+import requests
+import logging
 from gcp_secrets import get_secret_or_env
 
 logger = logging.getLogger(__name__)
 
-# Meshy API configuration
-API_BASE_URL = "https://api.meshy.ai/v1"
+# Get the API key from secrets or environment variables
 MESHY_API_KEY = None
 
 def init_api():
-    """Initialize the API client with the API key."""
+    """Initialize the Meshy API client with API key."""
     global MESHY_API_KEY
+    
+    # Try to get API key from secrets or environment
     MESHY_API_KEY = get_secret_or_env('meshy-api-key', 'MESHY_API_KEY')
+    
     if not MESHY_API_KEY:
-        logger.error("Meshy API key not found!")
+        logger.error("MESHY_API_KEY not found in secrets or environment")
         return False
     return True
 
 def get_headers():
-    """Get the request headers with authentication."""
+    """Get API request headers with authorization."""
+    if not MESHY_API_KEY and not init_api():
+        raise ValueError("Meshy API key not configured")
+        
     return {
-        "Authorization": f"Bearer {MESHY_API_KEY}",
+        "Authorization": f"Bearer {MESHY_API_KEY}", 
         "Content-Type": "application/json"
     }
+
+def image_to_data_uri(image_bytes):
+    """Convert image bytes to data URI."""
+    return f"data:image/jpeg;base64,{base64.b64encode(image_bytes).decode('utf-8')}"
 
 def upload_image_to_3d(image_path, settings=None):
     """
@@ -40,63 +46,66 @@ def upload_image_to_3d(image_path, settings=None):
     
     Args:
         image_path: Path to the image file
-        settings: Dictionary of settings for the Meshy API
+        settings: Dictionary of settings for conversion
         
     Returns:
         task_id: The task ID for tracking conversion progress
         error: Error message if any
     """
-    if not init_api():
-        return None, "API key not configured"
-    
+    if not os.path.exists(image_path):
+        return None, f"Image file not found: {image_path}"
+        
     try:
-        # Read the image file as base64
+        # Read the image file
         with open(image_path, "rb") as f:
-            image_data = base64.b64encode(f.read()).decode("utf-8")
+            image_bytes = f.read()
+            
+        # Convert to data URI
+        image_data_uri = image_to_data_uri(image_bytes)
         
         # Default settings if none provided
         if settings is None:
             settings = {
-                "promptText": "High quality detailed 3D model",
-                "negativePromptText": "low quality, bad geometry",
-                "taskType": "text-to-3d"  # or 'image-to-3d' based on API docs
+                "enable_pbr": False,
+                "should_remesh": True, 
+                "should_texture": True
             }
-        
-        # Prepare request payload
+            
+        # Prepare the request payload
         payload = {
-            "image": f"data:image/jpeg;base64,{image_data}",
+            "image_url": image_data_uri,
             **settings
         }
         
-        # Make API call
+        # Make the API call
         response = requests.post(
-            f"{API_BASE_URL}/image-to-3d",
-            headers=get_headers(),
-            json=payload
+            "https://api.meshy.ai/openapi/v1/image-to-3d",
+            json=payload, 
+            headers=get_headers()
         )
+        response.raise_for_status()
         
-        if response.status_code != 200:
-            logger.error(f"API Error: {response.status_code} - {response.text}")
-            return None, f"API Error: {response.status_code}"
-        
-        # Parse response
-        result = response.json()
-        task_id = result.get("taskId")
+        # Parse the response
+        task_data = response.json()
+        task_id = task_data.get("result")
         
         if not task_id:
-            logger.error("No task ID returned from API")
-            return None, "No task ID returned"
-        
+            logger.error("Meshy API did not return a task ID")
+            return None, "Meshy API did not return a task ID"
+            
         logger.info(f"Successfully submitted image to Meshy API. Task ID: {task_id}")
         return task_id, None
         
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Meshy API request error: {e}")
+        return None, f"Meshy API request error: {str(e)}"
     except Exception as e:
         logger.error(f"Error uploading image to Meshy API: {e}")
         return None, str(e)
 
 def check_task_status(task_id):
     """
-    Check the status of a task with the Meshy API.
+    Check the status of a conversion task.
     
     Args:
         task_id: The task ID to check
@@ -106,69 +115,68 @@ def check_task_status(task_id):
         result_url: URL to the 3D model if completed
         error: Error message if any
     """
-    if not init_api():
-        return "failed", None, "API key not configured"
-    
     try:
+        # Make the API call to check status
         response = requests.get(
-            f"{API_BASE_URL}/tasks/{task_id}",
+            f"https://api.meshy.ai/openapi/v1/image-to-3d/{task_id}",
             headers=get_headers()
         )
+        response.raise_for_status()
         
-        if response.status_code != 200:
-            logger.error(f"API Error checking task: {response.status_code} - {response.text}")
-            return "failed", None, f"API Error: {response.status_code}"
+        # Parse the response
+        task_json = response.json()
+        status_ = task_json.get("status")
         
-        result = response.json()
-        status = result.get("status", "unknown")
-        
-        # Handle different statuses
-        if status == "completed":
-            # Get the download URL for the 3D model
-            model_url = result.get("resultUrl")
-            if not model_url:
-                return "failed", None, "No result URL in completed task"
-            return "completed", model_url, None
-        elif status == "failed":
-            error_message = result.get("errorMessage", "Unknown error")
-            return "failed", None, error_message
-        else:
-            # Still processing
-            return "processing", None, None
+        # Map Meshy API status to our status format
+        if status_ == "SUCCEEDED":
+            # Get the model URL
+            model_urls = task_json.get("model_urls", {})
+            glb_url = model_urls.get("glb")
             
+            if not glb_url:
+                logger.error("No GLB URL found in Meshy response")
+                return "failed", None, "No GLB URL found in Meshy response"
+                
+            return "completed", glb_url, None
+            
+        elif status_ in ["FAILED", "CANCELED"]:
+            return "failed", None, f"Meshy task {status_}"
+            
+        # Still processing
+        return "processing", None, None
+        
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Error checking task status: {e}")
+        return "failed", None, f"API Error: {str(e)}"
+        
     except Exception as e:
         logger.error(f"Error checking task status: {e}")
         return "failed", None, str(e)
 
-def download_model(result_url, save_path):
+def download_model(url, save_path):
     """
-    Download a 3D model from the provided URL.
+    Download a 3D model from URL.
     
     Args:
-        result_url: URL to the 3D model
-        save_path: Path to save the downloaded model
+        url: URL of the model to download
+        save_path: Path where to save the model
         
     Returns:
         success: True if download was successful
         error: Error message if any
     """
     try:
-        response = requests.get(result_url, stream=True)
+        # Download the model
+        response = requests.get(url, stream=True)
+        response.raise_for_status()
         
-        if response.status_code != 200:
-            return False, f"Download failed with status {response.status_code}"
-        
+        # Save to file
         with open(save_path, "wb") as f:
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
-        
+                
         return True, None
+        
     except Exception as e:
         logger.error(f"Error downloading model: {e}")
         return False, str(e)
-
-# Example usage:
-# task_id, error = upload_image_to_3d("path/to/image.jpg")
-# status, result_url, error = check_task_status(task_id)
-# if status == "completed":
-#     download_model(result_url, "path/to/save/model.glb")
