@@ -1,7 +1,7 @@
 from flask import Flask, render_template, request, redirect, url_for, session, flash
 import os
 from functools import wraps
-from sqlalchemy import create_engine, Column, Integer, String, Boolean
+from sqlalchemy import create_engine, Column, Integer, String
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
@@ -18,22 +18,23 @@ class User(Base):
     __tablename__ = 'users'
     id = Column(Integer, primary_key=True)
     username = Column(String(50), unique=True, nullable=False)
-    password = Column(String(200), nullable=False)  # In production, store hashed passwords
+    password = Column(String(200), nullable=False)  # In production, use password hashing!
 
 Base.metadata.create_all(engine)
 DBSession = sessionmaker(bind=engine)
 db_session = DBSession()
 
-# Decorator for login required
+# Decorator to require login for user routes
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if 'user' not in session:
+            flash("Please log in first.")
             return redirect(url_for('login'))
         return f(*args, **kwargs)
     return decorated_function
 
-# Decorator for admin required
+# Decorator to require admin login
 def admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -43,29 +44,28 @@ def admin_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-# Home route
+# Home page
 @app.route('/')
 def index():
     return render_template('index.html')
 
-# Sign up route
+# User sign up
 @app.route('/signup', methods=['GET', 'POST'])
 def signup():
     if request.method == 'POST':
         username = request.form['username']
-        password = request.form['password']  # Hash this in production!
-        # Simple check: avoid duplicate usernames
+        password = request.form['password']  # Remember to hash passwords in production!
         if db_session.query(User).filter_by(username=username).first():
             flash("Username already exists!")
             return redirect(url_for('signup'))
         new_user = User(username=username, password=password)
         db_session.add(new_user)
         db_session.commit()
-        flash("Account created, please log in.")
+        flash("Account created successfully. Please log in.")
         return redirect(url_for('login'))
     return render_template('signup.html')
 
-# Sign in route
+# User login
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -85,29 +85,36 @@ def login():
 def dashboard():
     return render_template('dashboard.html', username=session['user'])
 
-# Admin login for the admin dashboard
+# Admin login page
 @app.route('/admin/login', methods=['GET', 'POST'])
 def admin_login():
     if request.method == 'POST':
         admin_user = request.form['username']
         admin_pass = request.form['password']
-        # Admin credentials are hard-coded as per your requirement
+        # Hard-coded admin credentials as per requirement (username: mvsr, password: mvsr)
         if admin_user == "mvsr" and admin_pass == "mvsr":
             session['admin'] = True
-            flash("Welcome Admin!")
+            flash("Welcome, Admin!")
             return redirect(url_for('admin'))
         flash("Invalid admin credentials.")
     return render_template('admin_login.html')
 
-# Admin dashboard: List all accounts and tickboxes for data fetched
+# Admin dashboard: view all user accounts and data fetch status
 @app.route('/admin')
 @admin_required
 def admin():
     users = db_session.query(User).all()
-    # Dummy flags for demonstration; implement actual checks for SQL and bucket fetches
-    sql_fetched = True  # Replace with actual logic
-    bucket_fetched = False  # Replace with actual logic
+    # Dummy flags for demonstration; replace with actual checks for SQL and bucket fetch statuses
+    sql_fetched = True   # Replace with your logic for SQL instance data check
+    bucket_fetched = False  # Replace with your logic for bucket data check
     return render_template('admin.html', users=users, sql_fetched=sql_fetched, bucket_fetched=bucket_fetched)
+
+# Logout route for users
+@app.route('/logout')
+def logout():
+    session.clear()
+    flash("You have been logged out.")
+    return redirect(url_for('index'))
 
 if __name__ == '__main__':
     app.run(debug=True)
