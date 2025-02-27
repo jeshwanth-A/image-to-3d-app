@@ -5,14 +5,14 @@ from flask import Blueprint, render_template, request, jsonify, render_template_
 from flask_login import login_required, current_user
 from google.cloud import storage
 from werkzeug.utils import secure_filename
-# Other imports
+from main import db
 import logging
 import uuid
 import json
 import traceback
 from datetime import datetime
-# Changed from 'secrets' to 'gcp_secrets'
 from gcp_secrets import get_secret_or_env
+import meshy_api
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -229,44 +229,50 @@ def allowed_file(filename):
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-# Simulated Meshy API functions
+# Replace the simulated API functions with real ones:
+
 def upload_to_meshy_api(file_path):
-    """Simulate uploading to Meshy API."""
-    # In a real implementation, this would make an API call to the Meshy service
-    logger.info(f"Simulating upload of {file_path} to Meshy API")
+    """Upload image to Meshy API for 3D conversion."""
+    logger.info(f"Uploading {file_path} to Meshy API")
     
-    # For now, just return a fake task ID
-    task_id = str(uuid.uuid4())
-    logger.info(f"Received task ID: {task_id}")
+    # Set optional processing settings
+    settings = {
+        "promptText": "High quality detailed 3D model",
+        "negativePromptText": "low quality, bad geometry",
+        "taskType": "image-to-3d"
+    }
     
-    try:
-        # If you have actual API credentials, you would use them here
-        api_key = get_secret_or_env('meshy-api-key', 'MESHY_API_KEY')
-        if api_key:
-            # Here you would make the actual API request
-            logger.info("Found Meshy API key, would make real request")
-    except Exception as e:
-        logger.error(f"Error with Meshy API: {e}")
+    # Call the Meshy API
+    task_id, error = meshy_api.upload_image_to_3d(file_path, settings)
+    
+    if error:
+        logger.error(f"Meshy API upload error: {error}")
+        raise Exception(f"Meshy API error: {error}")
         
+    logger.info(f"Successfully submitted to Meshy API. Task ID: {task_id}")
     return task_id
 
 def check_meshy_task_status(task_id):
-    """Simulate checking task status with Meshy API."""
-    # In a real implementation, this would make an API call to check status
+    """Check task status with Meshy API."""
     logger.info(f"Checking status of task {task_id}")
     
-    # For simulation purposes, just return a random status
-    import random
-    statuses = ['processing', 'processing', 'completed']
-    status = random.choice(statuses)
+    # Call the Meshy API to check status
+    status, result_url, error = meshy_api.check_task_status(task_id)
     
-    result_url = None
-    if status == 'completed':
-        result_url = f"https://example.com/3d-models/{task_id}.glb"
+    if error and status == "failed":
+        logger.error(f"Meshy API task failed: {error}")
+        return "failed", None
     
-    return status, result_url
+    logger.info(f"Task {task_id} status: {status}")
+    
+    # For completed tasks, store the result URL
+    if status == "completed" and result_url:
+        logger.info(f"Task {task_id} completed. Result URL: {result_url}")
+        return "completed", result_url
+    
+    # Still processing
+    return status, None
 
-# This function would be called by the scheduler to check statuses of all processing tasks
 def check_task_status():
     """Check status of all processing uploads."""
     try:
@@ -276,7 +282,7 @@ def check_task_status():
         
         for upload in processing_uploads:
             if upload.task_id:
-                # Check status with API
+                # Check status with real API
                 status, result_url = check_meshy_task_status(upload.task_id)
                 
                 if status != upload.status:
