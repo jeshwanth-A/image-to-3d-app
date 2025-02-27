@@ -207,6 +207,10 @@ def login():
     error = None
     message = None
     
+    # Check if request includes a message parameter (for redirects)
+    if request.args.get('message'):
+        message = request.args.get('message')
+    
     try:
         # Handle form submission
         if request.method == 'POST':
@@ -215,46 +219,36 @@ def login():
             
             # Check for test credentials (mvsr/mvsr)
             if username == 'mvsr' and password == 'mvsr':
-                # Create user if it doesn't exist
+                # Get the user
                 user = User.query.filter_by(username='mvsr').first()
-                if not user:
-                    # Create the test user
-                    try:
-                        user = User(
-                            username='mvsr',
-                            email='mvsr@example.com',
-                            password=generate_password_hash('mvsr', method='sha256')
-                        )
-                        db.session.add(user)
-                        db.session.commit()
-                        logger.info("Created test user 'mvsr'")
-                    except Exception as e:
-                        logger.error(f"Error creating test user: {e}")
-                        db.session.rollback()
                 
-                # Get the user again in case creation failed
-                user = User.query.filter_by(username='mvsr').first()
                 if user:
+                    # Admin user found, just log them in
                     login_user(user)
-                    logger.info(f"User {username} logged in with test credentials")
+                    logger.info(f"Admin user {username} logged in")
                     return redirect(url_for('routes.index'))
                 else:
-                    error = "Failed to create test user. Please try again."
+                    # No admin user found - provide a helpful message
+                    error = "Admin user not found. Please run admin_setup.py to create it."
+                    logger.error("Admin user login failed - user doesn't exist")
             else:
                 # Regular login
                 user = User.query.filter_by(username=username).first()
                 
-                if not user or not check_password_hash(user.password, password):
-                    error = "Invalid username or password. Try again."
+                if not user:
+                    error = "Invalid username. Please try again."
+                    logger.warning(f"Login attempt with invalid username: {username}")
+                elif not check_password_hash(user.password, password):
+                    error = "Invalid password. Please try again."
+                    logger.warning(f"Login attempt with invalid password for user: {username}")
                 else:
                     login_user(user)
-                    logger.info(f"User {username} logged in")
+                    logger.info(f"User {username} logged in successfully")
                     return redirect(url_for('routes.index'))
     
     except Exception as e:
-        logger.error(f"Login error: {e}")
-        logger.error(traceback.format_exc())
-        error = "An error occurred during login. Please try again."
+        logger.error(f"Login error: {e}", exc_info=True)
+        error = f"Database error: {str(e)}. Please try again."
     
     # For GET requests or if login failed
     return render_template_string(LOGIN_TEMPLATE, error=error, message=message)
