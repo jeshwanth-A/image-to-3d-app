@@ -205,27 +205,52 @@ ADMIN_TEMPLATE = """
 @auth_bp.route('/login', methods=['GET', 'POST'])
 def login():
     """Handle user login."""
-    if current_user.is_authenticated:
-        if current_user.is_admin:
-            return redirect(url_for('admin.dashboard'))
-        return redirect(url_for('auth.profile'))
-        
-    if request.method == 'POST':
-        username = request.form.get('username')
-        password = request.form.get('password')
-        
-        user = User.query.filter_by(username=username).first()
-        
-        # Check credentials
-        if user and check_password_hash(user.password, password):
-            login_user(user)
-            if user.is_admin:
+    try:
+        if current_user.is_authenticated:
+            if current_user.is_admin:
                 return redirect(url_for('admin.dashboard'))
             return redirect(url_for('auth.profile'))
-        else:
-            flash('Invalid username or password')
-    
-    return render_template('login.html')
+            
+        error = None
+        message = request.args.get('message')
+        
+        if request.method == 'POST':
+            username = request.form.get('username')
+            password = request.form.get('password')
+            
+            if not username or not password:
+                error = "Username and password are required"
+            else:
+                try:
+                    user = User.query.filter_by(username=username).first()
+                    
+                    # Check credentials
+                    if user and check_password_hash(user.password, password):
+                        login_user(user)
+                        logger.info(f"User {username} logged in successfully")
+                        
+                        if user.is_admin:
+                            return redirect(url_for('admin.dashboard'))
+                        return redirect(url_for('auth.profile'))
+                    else:
+                        error = 'Invalid username or password'
+                        logger.warning(f"Failed login attempt for username: {username}")
+                except Exception as e:
+                    logger.error(f"Database error during login: {str(e)}")
+                    logger.error(traceback.format_exc())
+                    error = "System error occurred during login"
+        
+        # Use direct template string if login.html doesn't exist
+        try:
+            return render_template('login.html', error=error, message=message)
+        except Exception as template_error:
+            logger.warning(f"Could not render login template: {str(template_error)}")
+            return render_template_string(LOGIN_TEMPLATE, error=error, message=message)
+            
+    except Exception as e:
+        logger.error(f"Unexpected error in login route: {str(e)}")
+        logger.error(traceback.format_exc())
+        raise
 
 @auth_bp.route('/signup', methods=['GET', 'POST'])
 def signup():

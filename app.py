@@ -5,7 +5,7 @@ This simplified version focuses on core functionality.
 import os
 import sys
 import logging
-from flask import Flask, render_template, redirect, url_for, flash, request
+from flask import Flask, render_template, redirect, url_for, flash, request, jsonify
 from flask_login import LoginManager, current_user
 from models import db, User, Upload
 from gcp_secrets import get_secret_or_env
@@ -76,6 +76,24 @@ def create_app():
                 return redirect(url_for('admin.dashboard'))
             return redirect(url_for('auth.profile'))
         return redirect(url_for('auth.login'))
+    
+    # Add error handlers
+    @app.errorhandler(404)
+    def page_not_found(e):
+        return render_template('error.html', error=str(e), code=404), 404
+    
+    @app.errorhandler(500)
+    def internal_server_error(e):
+        logger.error(f"Server error: {str(e)}")
+        if request.path.startswith('/auth'):
+            if request.is_xhr or request.path.endswith('.json'):
+                return jsonify({
+                    'error': 'Internal Server Error', 
+                    'details': str(e), 
+                    'request_path': request.path,
+                    'request_method': request.method
+                }), 500
+        return render_template('error.html', error=str(e), code=500), 500
     
     return app
 
