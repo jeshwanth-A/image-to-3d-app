@@ -19,11 +19,11 @@ ADMIN_SETUP_STATUS=$?
 # Print status
 echo "Admin setup exit code: $ADMIN_SETUP_STATUS"
 
-# Make sure secrets.py is found
-if [ -f /app/secrets.py ]; then
-    echo "secrets.py found"
+# Make sure gcp_secrets.py is found (renamed from secrets.py)
+if [ -f /app/gcp_secrets.py ]; then
+    echo "gcp_secrets.py found"
 else
-    echo "WARNING: secrets.py not found!"
+    echo "WARNING: gcp_secrets.py not found!"
 fi
 
 # Check for model definitions

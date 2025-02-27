@@ -21,7 +21,7 @@ upload_bp = Blueprint('upload', __name__, url_prefix='/upload')
 
 # Google Cloud Storage setup (no service account file needed in Cloud Run)
 storage_client = storage.Client()
-bucket = storage_client.bucket(os.getenv('GCS_BUCKET_NAME'))
+bucket = storage_client.bucket(os.getenv('GCS_BUCKET_NAME', 'project-2-450420-images'))
 
 # Meshy API setup
 MESHY_API_URL = 'https://api.meshy.ai/v1/image-to-3d'  # Hypothetical
