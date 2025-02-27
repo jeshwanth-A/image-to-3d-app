@@ -1,0 +1,25 @@
+body {
+    font-family: Arial, sans-serif;
+    margin: 20px;
+}
+h1, h2 {
+    color: #333;
+}
+form {
+    margin-bottom: 20px;
+}
+input, button {
+    padding: 5px;
+    margin: 5px 0;
+}
+a {
+    color: #007BFF;
+    text-decoration: none;
+}
+a:hover {
+    text-decoration: underline;
+}
+#taskList div {
+    border-bottom: 1px solid #ccc;
+    padding: 10px 0;
+}

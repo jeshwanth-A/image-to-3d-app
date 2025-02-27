@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <h1>Dashboard</h1>
+    <p>Welcome, {{ current_user.username }}! <a href="{{ url_for('auth.logout') }}">Logout</a></p>
+    
+    <h2>Upload Image</h2>
+    <form id="uploadForm">
+        <input type="file" name="file" accept="image/*" required>
+        <button type="submit">Upload</button>
+    </form>
+    
+    <h2>Your Tasks</h2>
+    <div id="taskList"></div>
+    
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
