@@ -11,6 +11,7 @@ import uuid
 import json
 import traceback
 from datetime import datetime
+from secrets import get_secret_or_env
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -239,7 +240,7 @@ def upload_to_meshy_api(file_path):
     
     try:
         # If you have actual API credentials, you would use them here
-        api_key = os.getenv('MESHY_API_KEY')
+        api_key = get_secret_or_env('meshy-api-key', 'MESHY_API_KEY')
         if api_key:
             # Here you would make the actual API request
             logger.info("Found Meshy API key, would make real request")

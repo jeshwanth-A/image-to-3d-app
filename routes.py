@@ -5,6 +5,7 @@ import os
 import datetime
 import logging
 import traceback
+from secrets import get_secret_or_env
 
 routes_bp = Blueprint('routes', __name__)
 logger = logging.getLogger(__name__)
@@ -172,6 +173,9 @@ def diagnostics():
         <div class="status-box {% if has_storage_bucket %}status-ok{% else %}status-warning{% endif %}">
             <strong>STORAGE_BUCKET:</strong> {% if has_storage_bucket %}Configured{% else %}Missing{% endif %}
         </div>
+        <div class="status-box {% if has_api_key %}status-ok{% else %}status-warning{% endif %}">
+            <strong>MESHY_API_KEY:</strong> {% if has_api_key %}Configured{% else %}Missing{% endif %}
+        </div>
         
         <h2>Application Status</h2>
         <div class="status-box status-ok">
@@ -194,9 +198,16 @@ def diagnostics():
     except Exception as e:
         db_error = str(e)
     
-    # Check environment variables
-    has_database_url = bool(os.getenv('DATABASE_URL'))
-    has_secret_key = os.getenv('FLASK_SECRET_KEY') != 'default_secret_key'
+    # Check environment variables and secrets
+    database_url = get_secret_or_env('database-url', 'DATABASE_URL')
+    has_database_url = database_url is not None and database_url != 'sqlite:///default.db'
+    
+    secret_key = get_secret_or_env('flask-secret-key', 'FLASK_SECRET_KEY') 
+    has_secret_key = secret_key is not None and secret_key != 'default_secret_key'
+    
+    meshy_api_key = get_secret_or_env('meshy-api-key', 'MESHY_API_KEY')
+    has_api_key = meshy_api_key is not None
+    
     has_storage_bucket = bool(os.getenv('STORAGE_BUCKET'))
     
     return render_template_string(
@@ -206,6 +217,7 @@ def diagnostics():
         has_database_url=has_database_url,
         has_secret_key=has_secret_key,
         has_storage_bucket=has_storage_bucket,
+        has_api_key=has_api_key,
         debug_mode=current_app.debug,
         username=current_user.username
     )

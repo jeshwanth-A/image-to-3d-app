@@ -7,6 +7,9 @@ import logging
 import pytz
 import traceback
 
+# Import our Secret Manager helper
+from secrets import get_secret_or_env
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -17,17 +20,25 @@ logger = logging.getLogger(__name__)
 # Create Flask app
 app = Flask(__name__)
 
-# Database configuration
-DATABASE_URL = os.getenv('DATABASE_URL', 'sqlite:///default.db')
+# Get configuration from Secret Manager
+DATABASE_URL = get_secret_or_env('database-url', 'DATABASE_URL', 'sqlite:///default.db')
+FLASK_SECRET_KEY = get_secret_or_env('flask-secret-key', 'FLASK_SECRET_KEY', 'default_secret_key')
+
+# Handle PostgreSQL URL format
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
-    
+
+# Database configuration
 app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URL
-app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY', 'default_secret_key')
+app.config['SECRET_KEY'] = FLASK_SECRET_KEY
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # Debug mode based on environment variable
 app.config['DEBUG'] = os.getenv('FLASK_DEBUG', 'False').lower() in ['true', '1', 't']
+
+# Log configuration status
+logger.info(f"Database URL configured: {'valid' if DATABASE_URL != 'sqlite:///default.db' else 'using default'}")
+logger.info(f"Secret key configured: {'valid' if FLASK_SECRET_KEY != 'default_secret_key' else 'using default'}")
 
 # Initialize extensions
 db = SQLAlchemy(app)
