@@ -50,5 +50,6 @@ def shutdown_scheduler(exception=None):
     scheduler.shutdown()
 
 if __name__ == '__main__':
-    port = int(os.getenv('PORT', 8080))  # Default to 8080
-    app.run(host='0.0.0.0', port=port)
+    port = int(os.getenv('PORT', '8080'))  # Ensure a default is set
+    print(f"Starting Flask on port {port}...")  # Debugging output
+    app.run(host='0.0.0.0', port=port, debug=False)
