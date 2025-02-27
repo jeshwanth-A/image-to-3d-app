@@ -34,6 +34,9 @@ else
     echo "No models.py file, User model is likely defined in main.py"
 fi
 
+# Add this line before starting the application:
+echo "Using database: $(echo $DATABASE_URL | sed 's/:[^:]*@/@/g')"
+
 # Start the application with gunicorn
 echo "Starting application..."
 exec gunicorn --bind :$PORT --workers 1 --threads 8 --timeout 0 wsgi:application

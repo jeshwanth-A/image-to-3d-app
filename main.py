@@ -46,26 +46,16 @@ login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'auth.login'
 
-# Create models before they're imported elsewhere
+# Import models
+from models import db, User, Upload
+
+# Initialize database with the app
+db.init_app(app)
+
+# Create all tables
 with app.app_context():
-    # Define models here
-    class User(db.Model):
-        id = db.Column(db.Integer, primary_key=True)
-        username = db.Column(db.String(80), unique=True, nullable=False)
-        email = db.Column(db.String(120), unique=True, nullable=False)
-        password = db.Column(db.String(200), nullable=False)
-        
-        def is_active(self):
-            return True
-            
-        def is_authenticated(self):
-            return True
-            
-        def is_anonymous(self):
-            return False
-            
-        def get_id(self):
-            return str(self.id)
+    db.create_all()
+    logger.info("Database tables created successfully")
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -74,14 +64,6 @@ def load_user(user_id):
     except Exception as e:
         logger.error(f"Error loading user: {e}")
         return None
-
-# Initialize the database
-try:
-    with app.app_context():
-        db.create_all()
-        logger.info("Database tables created successfully")
-except Exception as e:
-    logger.error(f"Database initialization error: {e}")
 
 # Add error handlers
 @app.errorhandler(500)

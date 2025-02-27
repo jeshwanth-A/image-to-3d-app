@@ -28,7 +28,7 @@ LOGIN_TEMPLATE = """
         .links { margin-top: 15px; }
         .links a { margin-right: 15px; }
     </style>
-</head>
+</head>fsfd
 <body>
     <h1>Login</h1>
     
