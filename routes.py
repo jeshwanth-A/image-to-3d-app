@@ -19,13 +19,7 @@ def health():
             "status": "ok",
             "timestamp": datetime.datetime.now().isoformat(),
             "python_version": sys.version,
-            "environment": {k: v for k, v in os.environ.items() if not k.startswith('_')},
-            "app_config": {
-                key: str(current_app.config.get(key)) 
-                for key in current_app.config.keys() 
-                if not key.startswith('_')
-                and key not in ['SECRET_KEY']  # Don't expose sensitive info
-            }
+            "environment": {k: v for k, v in os.environ.items() if not k.startswith('_')}
         })
     except Exception as e:
         logger.exception("Error in health check")

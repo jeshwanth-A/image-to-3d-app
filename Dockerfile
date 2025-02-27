@@ -17,7 +17,7 @@ EXPOSE 8080
 # Set environment variables
 ENV PORT=8080
 ENV PYTHONUNBUFFERED=1
-ENV FLASK_DEBUG=True
+ENV FLASK_DEBUG=False
 
 # Run with gunicorn for better production deployment
-CMD exec gunicorn --bind :$PORT --workers 1 --threads 8 --timeout 0 --log-level debug wsgi:application
+CMD exec gunicorn --bind :$PORT --workers 1 --threads 8 --timeout 0 --log-level info wsgi:application
