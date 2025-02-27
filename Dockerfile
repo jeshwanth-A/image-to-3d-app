@@ -19,4 +19,4 @@ ENV PORT=8080
 ENV PYTHONUNBUFFERED=1
 
 # Run with gunicorn for better production deployment
-CMD exec gunicorn --bind :$PORT --workers 1 --threads 8 --timeout 0 main:app
+CMD exec gunicorn --bind :$PORT --workers 1 --threads 8 --timeout 0 wsgi:application

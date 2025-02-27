@@ -1,11 +1,12 @@
 Flask==2.0.1
 Flask-Login==0.5.0
 Flask-SQLAlchemy==2.5.1
-SQLAlchemy==1.4.49  # Pin to avoid __all__ issue
+SQLAlchemy==1.4.23  # Changed version to avoid __all__ issue
 google-cloud-storage==1.42.0
 requests==2.26.0
 python-dotenv==0.19.0
 apscheduler==3.8.1
+pytz==2021.3  # Added for APScheduler timezone support
 Werkzeug==2.0.1
 psycopg2-binary==2.9.3
 itsdangerous==2.0.1
