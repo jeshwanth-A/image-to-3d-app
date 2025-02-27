@@ -14,7 +14,6 @@ EXPOSE 5000
 
 # Set environment variables
 ENV FLASK_APP=main.py
-ENV FLASK_ENV=development
 
-# Run the application
-CMD ["python", "main.py"]
+# Run the application using Gunicorn
+CMD ["gunicorn", "--workers=4", "--bind=0.0.0.0:5000", "wsgi:app"]
