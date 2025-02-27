@@ -228,9 +228,25 @@ def login():
                     logger.info(f"Admin user {username} logged in")
                     return redirect(url_for('routes.index'))
                 else:
-                    # No admin user found - provide a helpful message
-                    error = "Admin user not found. Please run admin_setup.py to create it."
-                    logger.error("Admin user login failed - user doesn't exist")
+                    # EMERGENCY FIX: Create the admin user if it doesn't exist
+                    try:
+                        logger.warning("Admin user not found, creating it on the fly...")
+                        user = User(
+                            username='mvsr',
+                            email='mvsr@example.com',
+                            password=generate_password_hash('mvsr', method='sha256')
+                        )
+                        db.session.add(user)
+                        db.session.commit()
+                        logger.info("Admin user created successfully during login")
+                        
+                        # Log them in
+                        login_user(user)
+                        logger.info("Admin user logged in after creation")
+                        return redirect(url_for('routes.index'))
+                    except Exception as create_err:
+                        logger.error(f"Failed to create admin user on the fly: {create_err}")
+                        error = f"Failed to create admin user: {str(create_err)}"
             else:
                 # Regular login
                 user = User.query.filter_by(username=username).first()
