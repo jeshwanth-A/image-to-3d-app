@@ -1,11 +1,14 @@
 Flask==2.0.1
 Flask-Login==0.5.0
 Flask-SQLAlchemy==2.5.1
-SQLAlchemy==1.4.46  # Pin to a compatible 1.x version for Flask-SQLAlchemy 2.5.1
+SQLAlchemy==1.4.49  # Pin to avoid __all__ issue
 google-cloud-storage==1.42.0
 requests==2.26.0
 python-dotenv==0.19.0
 apscheduler==3.8.1
-pytz==2023.3  # Required by apscheduler
 Werkzeug==2.0.1
-psycopg2==2.9.3
+psycopg2-binary==2.9.3
+itsdangerous==2.0.1
+click==8.0.1
+Jinja2==3.0.1
+six==1.16.0
