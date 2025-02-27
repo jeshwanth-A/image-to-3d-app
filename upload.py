@@ -5,13 +5,14 @@ from flask import Blueprint, render_template, request, jsonify, render_template_
 from flask_login import login_required, current_user
 from google.cloud import storage
 from werkzeug.utils import secure_filename
-from models import Task, db
+# Other imports
 import logging
 import uuid
 import json
 import traceback
 from datetime import datetime
-from secrets import get_secret_or_env
+# Changed from 'secrets' to 'gcp_secrets'
+from gcp_secrets import get_secret_or_env
 
 # Configure logging
 logger = logging.getLogger(__name__)

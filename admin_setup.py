@@ -21,11 +21,11 @@ def get_db_url():
     
     if not database_url:
         try:
-            # Try to import our Secret Manager helper if available
-            from secrets import get_secret_or_env
+            # Try to import our Secret Manager helper if available (changed name)
+            from gcp_secrets import get_secret_or_env
             database_url = get_secret_or_env('database-url', 'DATABASE_URL', 'sqlite:///default.db')
         except ImportError:
-            logger.warning("Could not import secrets module, using default database")
+            logger.warning("Could not import gcp_secrets module, using default database")
             database_url = 'sqlite:///default.db'
     
     # Log which database we're using (without credentials)

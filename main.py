@@ -7,8 +7,8 @@ import logging
 import pytz
 import traceback
 
-# Import our Secret Manager helper
-from secrets import get_secret_or_env
+# Import our Secret Manager helper (changed from 'secrets' to 'gcp_secrets')
+from gcp_secrets import get_secret_or_env
 
 # Configure logging
 logging.basicConfig(

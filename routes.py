@@ -5,7 +5,8 @@ import os
 import datetime
 import logging
 import traceback
-from secrets import get_secret_or_env
+# Changed from 'secrets' to 'gcp_secrets'
+from gcp_secrets import get_secret_or_env
 
 routes_bp = Blueprint('routes', __name__)
 logger = logging.getLogger(__name__)
