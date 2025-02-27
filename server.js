@@ -12,20 +12,27 @@ app.use(cors());
 app.use(express.json());
 
 let secrets = null;
+let server = null;
 
 // Initialize application
 async function initializeApp() {
   try {
+    console.log('Starting initialization process...');
+    
     // Get secrets from Google Secret Manager
+    console.log('Fetching secrets from Google Secret Manager...');
     secrets = await initializeSecrets();
+    console.log('Secrets retrieved successfully');
     
     // Initialize database connection
+    console.log('Initializing database connection...');
     await initializeDatabase(secrets.dbUrl);
     
     console.log('Application initialized successfully');
   } catch (error) {
     console.error('Application initialization failed:', error);
-    process.exit(1);
+    // Don't exit immediately - let Cloud Run retry or handle as needed
+    throw error;
   }
 }
 
@@ -75,18 +82,60 @@ app.get('/api/protected', authenticateToken(secrets.flaskSecretKey), (req, res) 
   });
 });
 
-// Health check endpoint
+// Health check endpoint - important for Cloud Run
+app.get('/', (req, res) => {
+  res.status(200).send('Server is up and running');
+});
+
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok' });
 });
 
+// Graceful shutdown handler
+function shutdownGracefully() {
+  console.log('Shutting down gracefully...');
+  if (server) {
+    server.close(() => {
+      console.log('HTTP server closed');
+      process.exit(0);
+    });
+    
+    // Force close after 10s if server doesn't exit cleanly
+    setTimeout(() => {
+      console.error('Forcing server shutdown');
+      process.exit(1);
+    }, 10000);
+  } else {
+    process.exit(0);
+  }
+}
+
 // Start the server
-app.listen(port, async () => {
-  await initializeApp();
-  console.log(`Server running on port ${port}`);
-});
+async function startServer() {
+  try {
+    // We initialize first before starting HTTP server
+    await initializeApp();
+    
+    // Create the HTTP server
+    server = app.listen(port, () => {
+      console.log(`Server running on port ${port}`);
+    });
+    
+    // Handle common termination signals
+    process.on('SIGTERM', shutdownGracefully);
+    process.on('SIGINT', shutdownGracefully);
+    
+  } catch (error) {
+    console.error('Failed to start server:', error);
+    process.exit(1);
+  }
+}
 
 // Error handling for unhandled rejections
 process.on('unhandledRejection', (reason, promise) => {
   console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  // Don't crash the app, just log it
 });
+
+// Start everything up
+startServer();

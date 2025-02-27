@@ -11,7 +11,14 @@ const client = new SecretManagerServiceClient();
  */
 async function getSecret(secretName) {
   try {
-    const projectId = process.env.GOOGLE_CLOUD_PROJECT;
+    console.log(`Fetching secret: ${secretName}`);
+    const projectId = process.env.GOOGLE_CLOUD_PROJECT || process.env.PROJECT_ID;
+    
+    if (!projectId) {
+      throw new Error('GOOGLE_CLOUD_PROJECT or PROJECT_ID environment variable is not set');
+    }
+    
+    console.log(`Using project ID: ${projectId}`);
     const name = `projects/${projectId}/secrets/${secretName}/versions/latest`;
     
     const [version] = await client.accessSecretVersion({
@@ -30,10 +37,14 @@ async function getSecret(secretName) {
  */
 async function initializeSecrets() {
   try {
+    // For debugging in Cloud Run
+    console.log('Environment variables available:', Object.keys(process.env).join(', '));
+    
+    // Use environment variables as fallbacks for local development or testing
     const secrets = {
-      dbUrl: await getSecret('database-url'),
-      flaskSecretKey: await getSecret('flask-secret-key'),
-      meshyApiKey: await getSecret('meshy-api-key')
+      dbUrl: process.env.DATABASE_URL || await getSecret('database-url'),
+      flaskSecretKey: process.env.FLASK_SECRET_KEY || await getSecret('flask-secret-key'),
+      meshyApiKey: process.env.MESHY_API_KEY || await getSecret('meshy-api-key')
     };
     
     return secrets;
