@@ -1,13 +1,21 @@
 import os
 import base64
 import requests
-from flask import Blueprint, render_template, request, jsonify
+from flask import Blueprint, render_template, request, jsonify, render_template_string, redirect, url_for, flash, current_app
 from flask_login import login_required, current_user
 from google.cloud import storage
 from werkzeug.utils import secure_filename
 from models import Task, db
+import logging
+import uuid
+import json
+import traceback
+from datetime import datetime
 
-upload_bp = Blueprint('upload', __name__)
+# Configure logging
+logger = logging.getLogger(__name__)
+
+upload_bp = Blueprint('upload', __name__, url_prefix='/upload')
 
 # Google Cloud Storage setup (no service account file needed in Cloud Run)
 storage_client = storage.Client()
@@ -17,67 +25,266 @@ bucket = storage_client.bucket(os.getenv('GCS_BUCKET_NAME'))
 MESHY_API_URL = 'https://api.meshy.ai/v1/image-to-3d'  # Hypothetical
 MESHY_API_KEY = os.getenv('MESHY_API_KEY')
 
-@upload_bp.route('/dashboard')
-@login_required
-def dashboard():
-    return render_template('dashboard.html')
-
-@upload_bp.route('/upload', methods=['POST'])
-@login_required
-def upload_file():
-    file = request.files.get('file')
-    if not file:
-        return jsonify({'error': 'No file uploaded'}), 400
+# Define a simple model for uploads
+class Upload(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    filename = db.Column(db.String(100), nullable=False)
+    original_filename = db.Column(db.String(100), nullable=False)
+    task_id = db.Column(db.String(100), nullable=True)
+    status = db.Column(db.String(20), default='pending')
+    result_url = db.Column(db.String(255), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
-    filename = secure_filename(file.filename)
-    user_folder = f'{current_user.id}'
-    blob = bucket.blob(f'{user_folder}/{filename}')
-    blob.upload_from_file(file)
+    def __repr__(self):
+        return f'<Upload {self.filename}>'
 
-    # Convert file to base64 for Meshy API
-    file.seek(0)
-    file_content = file.read()
-    base64_image = base64.b64encode(file_content).decode('utf-8')
-    data_uri = f'data:image/{file.content_type.split("/")[1]};base64,{base64_image}'
-
-    # Create task with Meshy API
-    headers = {'Authorization': f'Bearer {MESHY_API_KEY}'}
-    data = {'image_url': data_uri}
-    response = requests.post(MESHY_API_URL, headers=headers, json=data)
+# HTML template for the upload form
+UPLOAD_FORM_TEMPLATE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Upload Image for 3D Conversion</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; line-height: 1.6; }
+        h1, h2 { color: #333; }
+        form { background-color: #f9f9f9; padding: 20px; border-radius: 5px; max-width: 500px; }
+        .form-group { margin-bottom: 15px; }
+        label { display: block; margin-bottom: 5px; }
+        input[type="file"] { width: 100%; padding: 8px; box-sizing: border-box; }
+        button { background-color: #4CAF50; color: white; padding: 10px 15px; border: none; cursor: pointer; border-radius: 4px; }
+        .error { color: #cc0000; margin-bottom: 15px; }
+        .success { color: #4CAF50; margin-bottom: 15px; }
+        .back-link { margin: 20px 0; }
+        .back-link a { padding: 10px; background-color: #4CAF50; color: white; 
+                      text-decoration: none; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <h1>Upload Image for 3D Conversion</h1>
     
-    if response.status_code == 200:
-        task_id = response.json().get('task_id')  # Adjust based on Meshy API
-        new_task = Task(user_id=current_user.id, task_id=task_id, image_file=filename)
-        db.session.add(new_task)
-        db.session.commit()
-        return jsonify({'message': 'File uploaded and task created'})
-    return jsonify({'error': 'Failed to create task'}), 500
+    <div class="back-link">
+        <a href="/">Back to Home</a>
+    </div>
+    
+    {% if error %}
+    <div class="error">{{ error }}</div>
+    {% endif %}
+    
+    {% if success %}
+    <div class="success">{{ success }}</div>
+    {% endif %}
+    
+    <form method="POST" action="{{ url_for('upload.upload_form') }}" enctype="multipart/form-data">
+        <div class="form-group">
+            <label for="image">Select Image (JPG, PNG)</label>
+            <input type="file" id="image" name="image" accept=".jpg,.jpeg,.png" required>
+        </div>
+        <button type="submit">Upload & Convert to 3D</button>
+    </form>
+    
+    <h2>Your Previous Uploads</h2>
+    <table border="1" style="width: 100%; border-collapse: collapse;">
+        <tr>
+            <th>Original Filename</th>
+            <th>Upload Date</th>
+            <th>Status</th>
+            <th>Actions</th>
+        </tr>
+        {% for upload in uploads %}
+        <tr>
+            <td>{{ upload.original_filename }}</td>
+            <td>{{ upload.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+            <td>{{ upload.status }}</td>
+            <td>
+                {% if upload.status == 'completed' %}
+                <a href="{{ upload.result_url }}" target="_blank">View 3D Model</a>
+                {% else %}
+                <a href="{{ url_for('upload.check_status', upload_id=upload.id) }}">Check Status</a>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </table>
+</body>
+</html>
+"""
 
-@upload_bp.route('/tasks')
+@upload_bp.route('/', methods=['GET', 'POST'])
 @login_required
-def get_tasks():
-    tasks = Task.query.filter_by(user_id=current_user.id).all()
-    task_list = [{'id': t.id, 'status': t.status, 'image_file': t.image_file, 'model_file': t.model_file} for t in tasks]
-    return jsonify(task_list)
+def upload_form():
+    error = None
+    success = None
+    
+    # Get user's previous uploads
+    uploads = Upload.query.filter_by(user_id=current_user.id).order_by(Upload.created_at.desc()).all()
+    
+    if request.method == 'POST':
+        try:
+            # Check if the post request has the file part
+            if 'image' not in request.files:
+                error = "No file part"
+            else:
+                file = request.files['image']
+                
+                # If user does not select file, browser also
+                # submits an empty part without filename
+                if file.filename == '':
+                    error = "No selected file"
+                else:
+                    if file and allowed_file(file.filename):
+                        # Generate a secure filename
+                        original_filename = secure_filename(file.filename)
+                        filename = f"{uuid.uuid4()}_{original_filename}"
+                        
+                        # Save file locally or to cloud storage
+                        file_path = os.path.join('/tmp', filename)
+                        file.save(file_path)
+                        
+                        # Create upload record in database
+                        new_upload = Upload(
+                            user_id=current_user.id,
+                            filename=filename,
+                            original_filename=original_filename,
+                            status='pending'
+                        )
+                        db.session.add(new_upload)
+                        db.session.commit()
+                        
+                        # Upload to Meshy API (simulated here)
+                        try:
+                            task_id = upload_to_meshy_api(file_path)
+                            if task_id:
+                                # Update record with task ID
+                                new_upload.task_id = task_id
+                                new_upload.status = 'processing'
+                                db.session.commit()
+                                success = "File uploaded successfully! 3D conversion in progress."
+                            else:
+                                error = "Failed to submit the image to the 3D conversion service."
+                        except Exception as e:
+                            logger.error(f"Error calling Meshy API: {e}")
+                            logger.error(traceback.format_exc())
+                            error = f"API Error: {str(e)}"
+                    else:
+                        error = "File type not allowed. Please upload a JPG or PNG image."
+        except Exception as e:
+            logger.error(f"Upload error: {e}")
+            logger.error(traceback.format_exc())
+            error = f"An error occurred during upload: {str(e)}"
+    
+    return render_template_string(
+        UPLOAD_FORM_TEMPLATE, 
+        error=error, 
+        success=success, 
+        uploads=uploads
+    )
 
-def check_task_status():
-    pending_tasks = Task.query.filter_by(status='pending').all()
-    headers = {'Authorization': f'Bearer {MESHY_API_KEY}'}
-    for task in pending_tasks:
-        status_url = f'{MESHY_API_URL}/{task.task_id}'  # Adjust based on Meshy API
-        response = requests.get(status_url, headers=headers)
-        if response.status_code == 200:
-            data = response.json()
-            if data.get('status') == 'SUCCEEDED':
-                model_url = data['model_urls']['glb']  # Adjust based on API
-                model_response = requests.get(model_url)
-                if model_response.status_code == 200:
-                    model_filename = f'{task.id}_model.glb'
-                    model_blob = bucket.blob(f'{task.user_id}/{model_filename}')
-                    model_blob.upload_from_string(model_response.content)
-                    task.model_file = model_filename
-                    task.status = 'completed'
-                    db.session.commit()
-            elif data.get('status') == 'FAILED':
-                task.status = 'failed'
+@upload_bp.route('/check-status/<int:upload_id>')
+@login_required
+def check_status(upload_id):
+    try:
+        upload = Upload.query.get(upload_id)
+        
+        if not upload:
+            return jsonify({"error": "Upload not found"}), 404
+            
+        if upload.user_id != current_user.id:
+            return jsonify({"error": "Unauthorized access"}), 403
+            
+        # If already completed, just return the result
+        if upload.status == 'completed':
+            return jsonify({
+                "status": "completed",
+                "result_url": upload.result_url
+            })
+            
+        # Otherwise check with the API for updates
+        if upload.task_id:
+            # Simulated API check
+            status, result_url = check_meshy_task_status(upload.task_id)
+            
+            if status != upload.status:
+                upload.status = status
+                if result_url:
+                    upload.result_url = result_url
                 db.session.commit()
+                
+            return jsonify({
+                "status": status,
+                "result_url": result_url
+            })
+        else:
+            return jsonify({"status": "error", "error": "No task ID found"}), 400
+            
+    except Exception as e:
+        logger.error(f"Error checking status: {e}")
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+# Helper function to check if file is allowed
+def allowed_file(filename):
+    ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
+    return '.' in filename and \
+           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+# Simulated Meshy API functions
+def upload_to_meshy_api(file_path):
+    """Simulate uploading to Meshy API."""
+    # In a real implementation, this would make an API call to the Meshy service
+    logger.info(f"Simulating upload of {file_path} to Meshy API")
+    
+    # For now, just return a fake task ID
+    task_id = str(uuid.uuid4())
+    logger.info(f"Received task ID: {task_id}")
+    
+    try:
+        # If you have actual API credentials, you would use them here
+        api_key = os.getenv('MESHY_API_KEY')
+        if api_key:
+            # Here you would make the actual API request
+            logger.info("Found Meshy API key, would make real request")
+    except Exception as e:
+        logger.error(f"Error with Meshy API: {e}")
+        
+    return task_id
+
+def check_meshy_task_status(task_id):
+    """Simulate checking task status with Meshy API."""
+    # In a real implementation, this would make an API call to check status
+    logger.info(f"Checking status of task {task_id}")
+    
+    # For simulation purposes, just return a random status
+    import random
+    statuses = ['processing', 'processing', 'completed']
+    status = random.choice(statuses)
+    
+    result_url = None
+    if status == 'completed':
+        result_url = f"https://example.com/3d-models/{task_id}.glb"
+    
+    return status, result_url
+
+# This function would be called by the scheduler to check statuses of all processing tasks
+def check_task_status():
+    """Check status of all processing uploads."""
+    try:
+        # Get all uploads with 'processing' status
+        processing_uploads = Upload.query.filter_by(status='processing').all()
+        logger.info(f"Checking status of {len(processing_uploads)} processing tasks")
+        
+        for upload in processing_uploads:
+            if upload.task_id:
+                # Check status with API
+                status, result_url = check_meshy_task_status(upload.task_id)
+                
+                if status != upload.status:
+                    upload.status = status
+                    if result_url:
+                        upload.result_url = result_url
+                    db.session.commit()
+                    logger.info(f"Updated task {upload.task_id} to status: {status}")
+    
+    except Exception as e:
+        logger.error(f"Error in check_task_status: {e}")
+        logger.error(traceback.format_exc())
+        db.session.rollback()

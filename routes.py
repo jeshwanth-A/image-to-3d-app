@@ -61,6 +61,7 @@ def index():
         <div style="margin-top: 30px;">
             <h3>Admin Links</h3>
             <div class="nav-links">
+                <a href="/auth/admin">User Management</a>
                 <a href="/health">Health Status</a>
                 <a href="/routes">View All Routes</a>
                 <a href="/debug">Debug Information</a>

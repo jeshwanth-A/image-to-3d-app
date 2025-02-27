@@ -110,6 +110,98 @@ SIGNUP_TEMPLATE = """
 </html>
 """
 
+# Admin panel template to view all users
+ADMIN_TEMPLATE = """
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Admin Panel - User Management</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; line-height: 1.6; }
+        h1, h2 { color: #333; }
+        table { border-collapse: collapse; width: 100%; }
+        table, th, td { border: 1px solid #ddd; }
+        th, td { padding: 10px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        tr:nth-child(even) { background-color: #f9f9f9; }
+        .action-button { padding: 5px 10px; margin-right: 5px; background-color: #4CAF50; 
+                        color: white; border: none; cursor: pointer; border-radius: 3px; }
+        .delete-button { background-color: #f44336; }
+        .back-link { margin: 20px 0; }
+        .back-link a { padding: 10px; background-color: #4CAF50; color: white; 
+                      text-decoration: none; border-radius: 4px; }
+        .admin-warning { background-color: #fff3cd; border-left: 4px solid #ffc107; 
+                       padding: 10px; margin: 20px 0; }
+        .password-field { 
+            font-family: monospace;
+            background-color: #f8f8f8;
+            padding: 3px;
+            border: 1px solid #ddd;
+        }
+    </style>
+</head>
+<body>
+    <h1>Admin Panel - User Management</h1>
+    
+    <div class="back-link">
+        <a href="/">Back to Home</a>
+    </div>
+    
+    <div class="admin-warning">
+        <strong>Admin Access:</strong> This page shows sensitive information and is restricted to administrators only.
+    </div>
+    
+    <h2>Registered Users</h2>
+    
+    <table>
+        <tr>
+            <th>ID</th>
+            <th>Username</th>
+            <th>Email</th>
+            <th>Password Hash</th>
+            <th>Actions</th>
+        </tr>
+        {% for user in users %}
+        <tr>
+            <td>{{ user.id }}</td>
+            <td>{{ user.username }}</td>
+            <td>{{ user.email }}</td>
+            <td class="password-field">{{ user.password }}</td>
+            <td>
+                <button class="action-button delete-button" onclick="deleteUser({{ user.id }})">Delete</button>
+            </td>
+        </tr>
+        {% endfor %}
+    </table>
+    
+    <script>
+        function deleteUser(userId) {
+            if (confirm('Are you sure you want to delete this user?')) {
+                fetch('/auth/admin/delete-user/' + userId, { 
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        alert('User deleted successfully');
+                        location.reload();
+                    } else {
+                        alert('Error: ' + data.error);
+                    }
+                })
+                .catch(error => {
+                    alert('An error occurred: ' + error);
+                });
+            }
+        }
+    </script>
+</body>
+</html>
+"""
+
 @auth_bp.route('/login', methods=['GET', 'POST'])
 def login():
     error = None
@@ -225,6 +317,48 @@ def signup():
 def logout():
     logout_user()
     return redirect(url_for('routes.index'))
+
+# New admin route to view all users
+@auth_bp.route('/admin')
+@login_required
+def admin_panel():
+    # Only allow access to user with username 'mvsr'
+    if current_user.username != 'mvsr':
+        return "Access denied. Admin privileges required.", 403
+        
+    try:
+        # Get all users from database
+        users = User.query.all()
+        return render_template_string(ADMIN_TEMPLATE, users=users)
+    except Exception as e:
+        logger.error(f"Error in admin panel: {e}")
+        return f"Error loading admin panel: {str(e)}", 500
+
+# Admin route to delete users
+@auth_bp.route('/admin/delete-user/<int:user_id>', methods=['POST'])
+@login_required
+def delete_user(user_id):
+    # Only allow access to user with username 'mvsr'
+    if current_user.username != 'mvsr':
+        return jsonify({"success": False, "error": "Access denied"}), 403
+    
+    try:
+        # Don't allow deleting the admin user
+        if user_id == current_user.id:
+            return jsonify({"success": False, "error": "Cannot delete admin user"}), 400
+        
+        user = User.query.get(user_id)
+        if not user:
+            return jsonify({"success": False, "error": "User not found"}), 404
+        
+        db.session.delete(user)
+        db.session.commit()
+        
+        return jsonify({"success": True, "message": f"User {user.username} deleted"}), 200
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error deleting user: {e}")
+        return jsonify({"success": False, "error": str(e)}), 500
 
 # API version for signup (for testing)
 @auth_bp.route('/api/signup', methods=['POST'])
