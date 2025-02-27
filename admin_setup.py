@@ -1,9 +1,10 @@
 """
-Admin setup script - run this file to create the admin user (mvsr)
+Admin setup script - creates the admin user (mvsr) automatically
 """
 import os
 import sys
 import logging
+import traceback
 from werkzeug.security import generate_password_hash
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
@@ -46,6 +47,7 @@ def setup_admin_user():
         # Create tables if they don't exist
         with app.app_context():
             db.create_all()
+            logger.info("Database tables created (if they didn't exist)")
         
         # Now create or update the admin user
         with app.app_context():
@@ -69,7 +71,8 @@ def setup_admin_user():
             logger.info("Admin user setup completed successfully!")
             
     except Exception as e:
-        logger.error(f"Error setting up admin user: {e}", exc_info=True)
+        logger.error(f"Error setting up admin user: {e}")
+        logger.error(traceback.format_exc())
         return False
         
     return True
@@ -83,4 +86,4 @@ if __name__ == "__main__":
         print("   Password: mvsr")
     else:
         print("❌ Failed to set up admin user. See error logs for details.")
-        sys.exit(1)
+        # Don't exit with error code - we want the container to continue starting up
