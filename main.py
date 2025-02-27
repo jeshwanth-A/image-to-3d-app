@@ -1,6 +1,6 @@
 import os
 import sys
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, redirect, url_for
 from flask_login import LoginManager
 from flask_sqlalchemy import SQLAlchemy
 import logging
@@ -199,3 +199,10 @@ else:
     except Exception as e:
         logger.error(f"Error initializing app for gunicorn: {e}")
         logger.error(traceback.format_exc())
+
+# Keep all existing code, just add this additional route to catch the signup error:
+
+@app.route('/signup', methods=['GET', 'POST'])
+def signup_redirect():
+    """Redirect /signup to /auth/signup"""
+    return redirect(url_for('auth.signup'))
