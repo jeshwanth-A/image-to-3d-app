@@ -204,206 +204,72 @@ ADMIN_TEMPLATE = """
 
 @auth_bp.route('/login', methods=['GET', 'POST'])
 def login():
-    error = None
-    message = None
+    """Handle user login."""
+    if current_user.is_authenticated:
+        if current_user.is_admin:
+            return redirect(url_for('admin.dashboard'))
+        return redirect(url_for('auth.profile'))
+        
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
+        
+        user = User.query.filter_by(username=username).first()
+        
+        # Check credentials
+        if user and check_password_hash(user.password, password):
+            login_user(user)
+            if user.is_admin:
+                return redirect(url_for('admin.dashboard'))
+            return redirect(url_for('auth.profile'))
+        else:
+            flash('Invalid username or password')
     
-    # Check if request includes a message parameter (for redirects)
-    if request.args.get('message'):
-        message = request.args.get('message')
-    
-    try:
-        # Handle form submission
-        if request.method == 'POST':
-            username = request.form.get('username')
-            password = request.form.get('password')
-            
-            # Check for test credentials (mvsr/mvsr)
-            if username == 'mvsr' and password == 'mvsr':
-                # Get the user
-                user = User.query.filter_by(username='mvsr').first()
-                
-                if user:
-                    # Admin user found, just log them in
-                    login_user(user)
-                    logger.info(f"Admin user {username} logged in")
-                    return redirect(url_for('routes.index'))
-                else:
-                    # EMERGENCY FIX: Create the admin user if it doesn't exist
-                    try:
-                        logger.warning("Admin user not found, creating it on the fly...")
-                        user = User(
-                            username='mvsr',
-                            email='mvsr@example.com',
-                            password=generate_password_hash('mvsr', method='sha256')
-                        )
-                        db.session.add(user)
-                        db.session.commit()
-                        logger.info("Admin user created successfully during login")
-                        
-                        # Log them in
-                        login_user(user)
-                        logger.info("Admin user logged in after creation")
-                        return redirect(url_for('routes.index'))
-                    except Exception as create_err:
-                        logger.error(f"Failed to create admin user on the fly: {create_err}")
-                        error = f"Failed to create admin user: {str(create_err)}"
-            else:
-                # Regular login
-                user = User.query.filter_by(username=username).first()
-                
-                if not user:
-                    error = "Invalid username. Please try again."
-                    logger.warning(f"Login attempt with invalid username: {username}")
-                elif not check_password_hash(user.password, password):
-                    error = "Invalid password. Please try again."
-                    logger.warning(f"Login attempt with invalid password for user: {username}")
-                else:
-                    login_user(user)
-                    logger.info(f"User {username} logged in successfully")
-                    return redirect(url_for('routes.index'))
-    
-    except Exception as e:
-        logger.error(f"Login error: {e}", exc_info=True)
-        error = f"Database error: {str(e)}. Please try again."
-    
-    # For GET requests or if login failed
-    return render_template_string(LOGIN_TEMPLATE, error=error, message=message)
+    return render_template('login.html')
 
 @auth_bp.route('/signup', methods=['GET', 'POST'])
 def signup():
-    error = None
-    
-    try:
-        if request.method == 'POST':
-            # Get form data
-            username = request.form.get('username')
-            email = request.form.get('email')
-            password = request.form.get('password')
+    """Handle user registration."""
+    if current_user.is_authenticated:
+        return redirect(url_for('auth.profile'))
+        
+    if request.method == 'POST':
+        username = request.form.get('username')
+        email = request.form.get('email')
+        password = request.form.get('password')
+        
+        # Check if user already exists
+        existing_user = User.query.filter((User.username == username) | 
+                                          (User.email == email)).first()
+        
+        if existing_user:
+            flash('Username or email already exists')
+        else:
+            # Create new user
+            new_user = User(
+                username=username,
+                email=email,
+                password=generate_password_hash(password),
+                is_admin=(username == 'mvsr')  # Only 'mvsr' is admin
+            )
             
-            # Validate data
-            if not username or not email or not password:
-                error = "All fields are required."
-            elif len(password) < 3:
-                error = "Password must be at least 3 characters."
-            else:
-                # Check if username or email already exists
-                existing_user = User.query.filter((User.username == username) | (User.email == email)).first()
-                
-                if existing_user:
-                    error = "Username or email already exists."
-                else:
-                    try:
-                        # Create new user
-                        new_user = User(
-                            username=username,
-                            email=email,
-                            password=generate_password_hash(password, method='sha256')
-                        )
-                        
-                        # Add to database
-                        db.session.add(new_user)
-                        db.session.commit()
-                        
-                        # Log success and redirect to login
-                        logger.info(f"New user created: {username}")
-                        return redirect(url_for('auth.login', message="Account created successfully! Please log in."))
-                    
-                    except Exception as e:
-                        db.session.rollback()
-                        logger.error(f"Error during user creation: {e}")
-                        logger.error(traceback.format_exc())
-                        error = "Database error. Please try again."
+            db.session.add(new_user)
+            db.session.commit()
+            
+            flash('Account created successfully!')
+            return redirect(url_for('auth.login'))
     
-    except Exception as e:
-        logger.error(f"Signup error: {e}")
-        logger.error(traceback.format_exc())
-        error = "An error occurred during signup. Please try again."
-    
-    # For GET requests or if signup failed
-    return render_template_string(SIGNUP_TEMPLATE, error=error)
+    return render_template('signup.html')
 
 @auth_bp.route('/logout')
 @login_required
 def logout():
+    """Handle user logout."""
     logout_user()
-    return redirect(url_for('routes.index'))
+    return redirect(url_for('auth.login'))
 
-# New admin route to view all users
-@auth_bp.route('/admin')
+@auth_bp.route('/profile')
 @login_required
-def admin_panel():
-    # Only allow access to user with username 'mvsr'
-    if current_user.username != 'mvsr':
-        return "Access denied. Admin privileges required.", 403
-        
-    try:
-        # Get all users from database
-        users = User.query.all()
-        return render_template_string(ADMIN_TEMPLATE, users=users)
-    except Exception as e:
-        logger.error(f"Error in admin panel: {e}")
-        return f"Error loading admin panel: {str(e)}", 500
-
-# Admin route to delete users
-@auth_bp.route('/admin/delete-user/<int:user_id>', methods=['POST'])
-@login_required
-def delete_user(user_id):
-    # Only allow access to user with username 'mvsr'
-    if current_user.username != 'mvsr':
-        return jsonify({"success": False, "error": "Access denied"}), 403
-    
-    try:
-        # Don't allow deleting the admin user
-        if user_id == current_user.id:
-            return jsonify({"success": False, "error": "Cannot delete admin user"}), 400
-        
-        user = User.query.get(user_id)
-        if not user:
-            return jsonify({"success": False, "error": "User not found"}), 404
-        
-        db.session.delete(user)
-        db.session.commit()
-        
-        return jsonify({"success": True, "message": f"User {user.username} deleted"}), 200
-    except Exception as e:
-        db.session.rollback()
-        logger.error(f"Error deleting user: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-# API version for signup (for testing)
-@auth_bp.route('/api/signup', methods=['POST'])
-def api_signup():
-    try:
-        data = request.json
-        username = data.get('username')
-        email = data.get('email')
-        password = data.get('password')
-        
-        # Validate data
-        if not username or not email or not password:
-            return jsonify({"error": "All fields are required"}), 400
-            
-        # Check if username or email already exists
-        existing_user = User.query.filter((User.username == username) | (User.email == email)).first()
-        
-        if existing_user:
-            return jsonify({"error": "Username or email already exists"}), 409
-            
-        # Create new user
-        new_user = User(
-            username=username,
-            email=email,
-            password=generate_password_hash(password, method='sha256')
-        )
-        
-        # Add to database
-        db.session.add(new_user)
-        db.session.commit()
-        
-        return jsonify({"message": "User created successfully"}), 201
-        
-    except Exception as e:
-        db.session.rollback()
-        logger.error(f"API signup error: {e}")
-        logger.error(traceback.format_exc())
-        return jsonify({"error": str(e)}), 500
+def profile():
+    """User profile page."""
+    return render_template('profile.html')

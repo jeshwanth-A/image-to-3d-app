@@ -11,14 +11,6 @@ logger = logging.getLogger(__name__)
 # Project ID is needed for accessing Secret Manager
 PROJECT_ID = os.environ.get('GOOGLE_CLOUD_PROJECT')
 
-# Initialize the Secret Manager client
-client = None
-try:
-    client = secretmanager.SecretManagerServiceClient()
-    logger.info("Secret Manager client initialized")
-except Exception as e:
-    logger.error(f"Failed to initialize Secret Manager client: {e}")
-
 def get_secret(secret_id, version_id="latest"):
     """
     Access the secret with the given name and version.
@@ -30,17 +22,15 @@ def get_secret(secret_id, version_id="latest"):
     Returns:
         The secret payload as a string or None if access fails
     """
-    # If client initialization failed, return None
-    if not client:
-        logger.error("Secret Manager client not available")
-        return None
-        
     # If project ID is not available, return None
     if not PROJECT_ID:
-        logger.error("GOOGLE_CLOUD_PROJECT environment variable not set")
+        logger.warning("GOOGLE_CLOUD_PROJECT environment variable not set")
         return None
         
     try:
+        # Initialize the Secret Manager client
+        client = secretmanager.SecretManagerServiceClient()
+        
         # Build the resource name
         name = f"projects/{PROJECT_ID}/secrets/{secret_id}/versions/{version_id}"
         
@@ -52,9 +42,6 @@ def get_secret(secret_id, version_id="latest"):
     except Exception as e:
         logger.error(f"Error accessing secret {secret_id}: {e}")
         return None
-
-# Cache for secrets to avoid repeated calls to Secret Manager
-_secret_cache = {}
 
 def get_secret_or_env(secret_id, env_var_name=None, default=None):
     """
@@ -70,10 +57,6 @@ def get_secret_or_env(secret_id, env_var_name=None, default=None):
     """
     if env_var_name is None:
         env_var_name = secret_id.replace('-', '_').upper()
-        
-    # Check cache first
-    if secret_id in _secret_cache:
-        return _secret_cache[secret_id]
     
     # Try Secret Manager
     secret_value = get_secret(secret_id)
@@ -84,9 +67,7 @@ def get_secret_or_env(secret_id, env_var_name=None, default=None):
         logger.info(f"Using environment variable {env_var_name} instead of Secret Manager")
     else:
         logger.info(f"Successfully retrieved secret {secret_id} from Secret Manager")
-        # Cache the secret
-        _secret_cache[secret_id] = secret_value
-        
+    
     # If both failed, use default
     if secret_value is None:
         logger.warning(f"Falling back to default value for {secret_id}")
