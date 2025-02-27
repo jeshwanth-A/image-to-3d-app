@@ -7,7 +7,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL')  # e.g., postgresql+psycopg2://user:pass@host/dbname
 app.config['SECRET_KEY'] = os.getenv('FLASK_SECRET_KEY')
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False #c132
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False #c132fe
 
 db = SQLAlchemy(app)
 login_manager = LoginManager()
