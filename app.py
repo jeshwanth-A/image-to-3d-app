@@ -65,15 +65,27 @@ def index():
 def signup():
     form = SignupForm()
     if form.validate_on_submit():
-        if User.query.filter_by(username=form.username.data).first():
-            flash('Username already exists.')
-            return redirect(url_for('signup'))
-        user = User(username=form.username.data)
-        user.set_password(form.password.data)
-        db.session.add(user)
-        db.session.commit()
-        flash('Account created!')
-        return redirect(url_for('login'))
+        try:
+            if User.query.filter_by(username=form.username.data).first():
+                flash('Username already exists.')
+                return redirect(url_for('signup'))
+            
+            user = User(username=form.username.data)
+            user.set_password(form.password.data)
+            db.session.add(user)
+            db.session.commit()
+            flash('Account created successfully!')
+            return redirect(url_for('login'))
+        except Exception as e:
+            db.session.rollback()
+            app.logger.error(f"Error during signup: {str(e)}")
+            flash('An error occurred during signup. Please try again.')
+    elif request.method == 'POST':
+        # This runs when form validation fails
+        for field, errors in form.errors.items():
+            for error in errors:
+                flash(f"{getattr(form, field).label.text}: {error}")
+                
     return render_template('signup.html', form=form)
 
 @app.route('/login', methods=['GET', 'POST'])

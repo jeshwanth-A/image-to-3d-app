@@ -1,10 +1,18 @@
 {% extends "base.html" %}
 {% block content %}
     <h1>Upload Image</h1>
+    <p>Upload an image to convert to a 3D model</p>
     <form method="POST" enctype="multipart/form-data">
         {{ form.hidden_tag() }}
         <div class="mb-3">
             {{ form.image.label }} {{ form.image(class="form-control") }}
+            {% if form.image.errors %}
+                <div class="text-danger">
+                    {% for error in form.image.errors %}
+                        <span>{{ error }}</span>
+                    {% endfor %}
+                </div>
+            {% endif %}
         </div>
         {{ form.submit(class="btn btn-primary") }}
     </form>
