@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block content %}
+    <div class="text-center">
+        <h1>Service Unavailable</h1>
+        <p>The server is currently unable to handle the request due to maintenance or overload. Please try again later.</p>
+        <p><a href="{{ url_for('index') }}">Return to the homepage</a></p>
+    </div>
+{% endblock %}

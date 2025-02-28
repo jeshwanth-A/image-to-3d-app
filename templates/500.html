@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block content %}
+    <div class="text-center">
+        <h1>Internal Server Error</h1>
+        <p>Something went wrong on our server. We're working to fix the issue.</p>
+        <p><a href="{{ url_for('index') }}">Return to the homepage</a></p>
+    </div>
+{% endblock %}
