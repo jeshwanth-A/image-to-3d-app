@@ -147,7 +147,6 @@ def upload():
             app.logger.info(f"Uploading image for user {current_user.id}")
             image_file = form.image.data
             image_bytes = image_file.read()
-
             storage_client = storage.Client()
             bucket = storage_client.bucket(os.environ['BUCKET_NAME'])
             filename = f'images/{current_user.id}/{image_file.filename}'
@@ -224,17 +223,18 @@ def models():
     user_models = Model.query.filter_by(user_id=current_user.id).all()
     return render_template('models.html', models=user_models)
 
-# Initialize database with debugging
+# Initialize database with forced schema reset
 with app.app_context():
     app.logger.info(f"Using DATABASE_URL: {app.config['SQLALCHEMY_DATABASE_URI']}")
-    app.logger.info("Attempting to create database tables...")
+    app.logger.info("Dropping and recreating all tables...")
+    db.drop_all()  # Drop existing tables to avoid schema conflicts
     db.create_all()
     inspector = inspect(db.engine)
     if 'User' in inspector.get_table_names():
         columns = inspector.get_columns('User')
-        app.logger.info(f"User table columns: {[(col['name'], col['type']) for col in columns]}")
+        app.logger.info(f"User table columns: {[(col['name'], str(col['type'])) for col in columns]}")
     else:
         app.logger.error("User table not found after db.create_all()")
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8080) #vs
+    app.run(host='0.0.0.0', port=8080)
