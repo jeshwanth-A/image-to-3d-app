@@ -1,0 +1,37 @@
+steps:
+  # Step 1: Build the Docker image from the Dockerfile in the current directory
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'gcr.io/project-2-450420/project-1', '.']
+  
+  # Step 2: Push the built image to Google Container Registry (GCR)
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/project-2-450420/project-1']
+  
+  # Step 3: Deploy the image to Cloud Run using the Google Cloud SDK
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'project-1'
+      - '--image'
+      - 'gcr.io/project-2-450420/project-1'
+      - '--region'
+      - 'us-central1'
+      - '--platform'
+      - 'managed'
+      - '--add-cloudsql-instances'
+      - 'project-2-450420:us-central1:arportal'
+      - '--set-secrets'
+      - 'FLASK_SECRET_KEY=flask-secret-key:latest,DATABASE_URL=database-url:latest,MESHY_API_KEY=meshy-api-key:latest'
+      - '--set-env-vars'
+      - 'BUCKET_NAME=project-2-450420-images'
+      - '--service-account'
+      - '686596926199-compute@developer.gserviceaccount.com'
+
+# Specify where to store build logs
+logsBucket: 'gs://project-2-450420-images'
+
+# Configure logging options
+options:
+  logging: GCS_ONLY
