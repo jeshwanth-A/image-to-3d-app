@@ -1,4 +1,4 @@
-\import logging
+import logging
 import time
 import base64
 from flask import Flask, render_template, redirect, url_for, flash, request
