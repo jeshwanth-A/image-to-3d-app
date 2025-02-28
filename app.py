@@ -37,7 +37,8 @@ HEADERS = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/js
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(64), unique=True, nullable=False)
-    password_hash = db.Column(db.String(256), nullable=False)  # Set to 256
+    password_hash = db.Column(db.String(256), nullable=False)
+    is_admin = db.Column(db.Boolean, default=False)# Set to 256
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -222,6 +223,15 @@ def models():
     app.logger.info(f"Fetching models for user {current_user.id}")
     user_models = Model.query.filter_by(user_id=current_user.id).all()
     return render_template('models.html', models=user_models)
+
+@app.route('/admin')
+@login_required
+def admin():
+    if not current_user.is_admin:
+        flash('Access denied. Admins only.')
+        return redirect(url_for('index'))
+    users = User.query.all()
+    return render_template('admin.html', users=users)
 
 # Initialize database with forced schema reset
 with app.app_context():
