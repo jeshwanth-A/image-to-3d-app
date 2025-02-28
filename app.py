@@ -11,6 +11,7 @@ from wtforms.validators import DataRequired, EqualTo
 import os
 from google.cloud import storage
 import requests
+from sqlalchemy import inspect
 
 # Setup Flask app
 app = Flask(__name__)
@@ -149,12 +150,12 @@ def upload():
             image_data_uri = image_to_data_uri(image_bytes, image_file.content_type)
             payload = {"image_url": image_data_uri, "enable_pbr": False, "should_remesh": True, "should_texture": True}
             app.logger.info("Calling Meshy API")
-            response = requests.post("https://api.meshy.ai/openapi/v1/image-to-3d", json=payload, headers=HEADERS)
+            response = requests.post("https://api.meshy.ai/openapi/v1/image-to-3d", json=payload, headers=HEADERS, timeout=10)
             response.raise_for_status()
             task_data = response.json()
             task_id = task_data.get("result")
             if not task_id:
-                app.logger.error("No task ID received from Meshy API")
+                app.logger.error(f"No task ID received: {task_data}")
                 flash("Task ID not received from API.")
                 return redirect(url_for('upload'))
             app.logger.info(f"Task created: {task_id}")
@@ -163,7 +164,8 @@ def upload():
             attempt = 0
             while attempt < max_attempts:
                 time.sleep(10)
-                task_response = requests.get(f"https://api.meshy.ai/openapi/v1/image-to-3d/{task_id}", headers=HEADERS)
+                task_response = requests.get(f"https://api.meshy.ai/openapi/v1/image-to-3d/{task_id}", headers=HEADERS, timeout=10)
+                task_response.raise_for_status()
                 task_status = task_response.json()
                 status = task_status.get("status")
                 app.logger.info(f"Task status: {status}")
@@ -172,7 +174,7 @@ def upload():
                     glb_url = model_urls.get("glb")
                     if glb_url:
                         app.logger.info(f"Model URL: {glb_url}")
-                        model_response = requests.get(glb_url)
+                        model_response = requests.get(glb_url, timeout=10)
                         model_content = model_response.content
                         model_filename = f'models/{current_user.id}/{image_file.filename}.glb'
                         model_blob = bucket.blob(model_filename)
@@ -196,22 +198,21 @@ def upload():
             app.logger.error("Task timed out after max attempts")
             flash('Task timed out.')
             return redirect(url_for('models'))
+        except requests.RequestException as e:
+            app.logger.error(f"Meshy API error: {str(e)} - Response: {e.response.text if e.response else 'No response'}")
+            flash(f'Meshy API error: {str(e)}')
+            return redirect(url_for('upload'))
         except Exception as e:
             app.logger.error(f"Upload error: {str(e)}")
             flash(f'Upload failed: {str(e)}')
             return redirect(url_for('upload'))
-    elif request.method == 'POST':
-        for field, errors in form.errors.items():
-            for error in errors:
-                flash(f"{getattr(form, field).label.text}: {error}")
     return render_template('upload.html', form=form)
 
 @app.route('/models')
 @login_required
 def models():
-    app.logger.info(f"Fetching models for user {current_user.id}")
     user_models = Model.query.filter_by(user_id=current_user.id).all()
-    app.logger.info(f"Found {len(user_models)} models: {[m.image_url for m in user_models]}")
+    app.logger.info(f"Found {len(user_models)} models for user {current_user.id}")
     return render_template('models.html', models=user_models)
 
 @app.route('/admin')
@@ -221,13 +222,12 @@ def admin():
         flash('Access denied. Admins only.')
         return redirect(url_for('index'))
     users = User.query.all()
-    app.logger.info(f"Admin view: {len(users)} users fetched")
     return render_template('admin.html', users=users)
 
-# Initialize database and hardcoded admin
+# Initialize database and ensure admin exists
 with app.app_context():
-    db.create_all()
-    # Check if admin exists, if not create one
+    db.create_all()  # Only creates tables if they don't exist
+    # Check and create admin user if not present
     admin = User.query.filter_by(username='admin').first()
     if not admin:
         admin = User(username='admin', is_admin=True)
@@ -236,7 +236,11 @@ with app.app_context():
         db.session.commit()
         app.logger.info("Admin user 'admin' created with password 'admin123'")
     else:
-        app.logger.info("Admin user already exists")
+        # Ensure existing admin has is_admin set to True
+        if not admin.is_admin:
+            admin.is_admin = True
+            db.session.commit()
+            app.logger.info("Updated existing 'admin' user to is_admin=True")
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080)
