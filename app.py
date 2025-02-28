@@ -3,7 +3,7 @@ import time
 import base64
 from flask import Flask, render_template, redirect, url_for, flash, request
 from flask_sqlalchemy import SQLAlchemy
-from flask_login import LoginManager, UserMixin, login_user, login_required, current_user
+from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_wtf import FlaskForm
 from wtforms import StringField, PasswordField, FileField, SubmitField
@@ -12,8 +12,7 @@ import os
 from google.cloud import storage
 import requests
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Setup Flask app
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'default-secret-key-for-dev')
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///app.db')
@@ -22,12 +21,15 @@ db = SQLAlchemy(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 
-# Load API Key
-API_KEY = os.getenv("MESHY_API_KEY")
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+app.logger.info("Starting Flask app...")
+
+# Load Meshy API Key
+API_KEY = os.environ.get("MESHY_API_KEY")
 if not API_KEY:
-    app.logger.error("MESHY_API_KEY environment variable is not set.")
-    raise ValueError("MESHY_API_KEY is required.")
-HEADERS = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
+    app.logger.warning("MESHY_API_KEY not set; upload functionality will fail.")
+HEADERS = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"} if API_KEY else {}
 
 # Models
 class User(UserMixin, db.Model):
@@ -80,32 +82,54 @@ def index():
 @app.route('/signup', methods=['GET', 'POST'])
 def signup():
     form = SignupForm()
+    app.logger.info("Signup route accessed")
     if form.validate_on_submit():
-        if User.query.filter_by(username=form.username.data).first():
-            flash('Username already exists.')
+        try:
+            app.logger.info(f"Checking if username {form.username.data} exists")
+            if User.query.filter_by(username=form.username.data).first():
+                flash('Username already exists.')
+                return redirect(url_for('signup'))
+            user = User(username=form.username.data)
+            user.set_password(form.password.data)
+            db.session.add(user)
+            db.session.commit()
+            app.logger.info(f"User {form.username.data} created successfully")
+            flash('Account created successfully!')
+            return redirect(url_for('login'))
+        except Exception as e:
+            db.session.rollback()
+            app.logger.error(f"Signup error: {str(e)}", exc_info=True)
+            flash('An error occurred during signup. Please try again.')
             return redirect(url_for('signup'))
-        user = User(username=form.username.data)
-        user.set_password(form.password.data)
-        db.session.add(user)
-        db.session.commit()
-        flash('Account created successfully!')
-        return redirect(url_for('login'))
+    elif request.method == 'POST':
+        app.logger.info("Form validation failed")
+        for field, errors in form.errors.items():
+            for error in errors:
+                flash(f"{getattr(form, field).label.text}: {error}")
     return render_template('signup.html', form=form)
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     form = LoginForm()
+    app.logger.info("Login route accessed")
     if form.validate_on_submit():
-        user = User.query.filter_by(username=form.username.data).first()
-        if user and user.check_password(form.password.data):
-            login_user(user)
-            return redirect(url_for('upload'))
-        flash('Invalid username or password.')
+        try:
+            user = User.query.filter_by(username=form.username.data).first()
+            if user and user.check_password(form.password.data):
+                login_user(user)
+                app.logger.info(f"User {form.username.data} logged in")
+                return redirect(url_for('upload'))
+            flash('Invalid username or password.')
+            app.logger.warning(f"Failed login attempt for {form.username.data}")
+        except Exception as e:
+            app.logger.error(f"Login error: {str(e)}", exc_info=True)
+            flash('An error occurred during login. Please try again.')
     return render_template('login.html', form=form)
 
 @app.route('/logout')
 @login_required
 def logout():
+    app.logger.info(f"User {current_user.username} logged out")
     logout_user()
     return redirect(url_for('index'))
 
@@ -127,6 +151,10 @@ def upload():
             blob.upload_from_string(image_bytes, content_type=image_file.content_type)
             image_url = blob.public_url
             app.logger.info(f"Image uploaded to {image_url}")
+
+            if not API_KEY:
+                flash('Meshy API key not configured. Model generation unavailable.')
+                return redirect(url_for('upload'))
 
             # Convert image to Data URI
             image_data_uri = image_to_data_uri(image_bytes, image_file.content_type)
@@ -194,17 +222,24 @@ def upload():
             app.logger.error(f"Error in upload route: {str(e)}", exc_info=True)
             flash('An error occurred during upload. Please try again.')
             return redirect(url_for('upload'))
+    elif request.method == 'POST':
+        app.logger.info("Upload form validation failed")
+        for field, errors in form.errors.items():
+            for error in errors:
+                flash(f"{getattr(form, field).label.text}: {error}")
     return render_template('upload.html', form=form)
 
 @app.route('/models')
 @login_required
 def models():
+    app.logger.info(f"Fetching models for user {current_user.id}")
     user_models = Model.query.filter_by(user_id=current_user.id).all()
     return render_template('models.html', models=user_models)
 
-# Create database tables
+# Initialize database
 with app.app_context():
+    app.logger.info("Creating database tables...")
     db.create_all()
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
+    app.run(host='0.0.0.0', port=8080)
