@@ -237,4 +237,4 @@ with app.app_context():
         app.logger.error("User table not found after db.create_all()")
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8080)
+    app.run(host='0.0.0.0', port=8080) #vs
