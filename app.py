@@ -4,7 +4,7 @@ from flask_login import LoginManager, UserMixin, login_user, login_required, log
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_wtf import FlaskForm
 from wtforms import StringField, PasswordField, FileField, SubmitField
-from wtforms.validators import DataRequired, EqualTo, Length
+from wtforms.validators import DataRequired, EqualTo
 import os
 from google.cloud import storage
 import requests
@@ -55,8 +55,8 @@ def load_user(user_id):
 
 # Forms
 class SignupForm(FlaskForm):
-    username = StringField('Username', validators=[DataRequired(), Length(min=3, max=64)])
-    password = PasswordField('Password', validators=[DataRequired(), Length(min=6)])
+    username = StringField('Username', validators=[DataRequired()])
+    password = PasswordField('Password', validators=[DataRequired()])
     confirm_password = PasswordField('Confirm Password', validators=[DataRequired(), EqualTo('password')])
     submit = SubmitField('Sign Up')
 
@@ -204,5 +204,4 @@ def before_first_request():
     init_db()
 
 if __name__ == '__main__':
-    init_db()  # Initialize database when running directly
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
