@@ -1,4 +1,4 @@
-import logging
+\import logging
 import time
 import base64
 from flask import Flask, render_template, redirect, url_for, flash, request
@@ -11,6 +11,7 @@ from wtforms.validators import DataRequired, EqualTo
 import os
 from google.cloud import storage
 import requests
+from sqlalchemy import inspect
 
 # Setup Flask app
 app = Flask(__name__)
@@ -24,7 +25,7 @@ login_manager.login_view = 'login'
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 app.logger.setLevel(logging.INFO)
-logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)  # Log SQL statements for debugging
+logging.getLogger('sqlalchemy.engine').setLevel(logging.INFO)  # Log SQL statements
 
 # Load Meshy API Key
 API_KEY = os.environ.get("MESHY_API_KEY")
@@ -36,7 +37,7 @@ HEADERS = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/js
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(64), unique=True, nullable=False)
-    password_hash = db.Column(db.String(256), nullable=False)  # Fixed length to 256,,
+    password_hash = db.Column(db.String(256), nullable=False)  # Set to 256
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -78,6 +79,7 @@ def image_to_data_uri(image_bytes: bytes, content_type: str) -> str:
 # Routes
 @app.route('/')
 def index():
+    app.logger.info(f"Accessing index with DATABASE_URL: {app.config['SQLALCHEMY_DATABASE_URI']}")
     return render_template('index.html')
 
 @app.route('/signup', methods=['GET', 'POST'])
@@ -92,7 +94,8 @@ def signup():
                 return redirect(url_for('signup'))
             user = User(username=form.username.data)
             user.set_password(form.password.data)
-            app.logger.info(f"Password hash length: {len(user.password_hash)}")  # Debug log
+            app.logger.info(f"Generated password hash: {user.password_hash}")
+            app.logger.info(f"Password hash length: {len(user.password_hash)}")
             db.session.add(user)
             db.session.commit()
             app.logger.info(f"User {form.username.data} created successfully")
@@ -145,7 +148,6 @@ def upload():
             image_file = form.image.data
             image_bytes = image_file.read()
 
-            # Upload image to GCS
             storage_client = storage.Client()
             bucket = storage_client.bucket(os.environ['BUCKET_NAME'])
             filename = f'images/{current_user.id}/{image_file.filename}'
@@ -158,19 +160,8 @@ def upload():
                 flash('Meshy API key not configured. Model generation unavailable.')
                 return redirect(url_for('upload'))
 
-            # Convert image to Data URI
             image_data_uri = image_to_data_uri(image_bytes, image_file.content_type)
-
-            # Prepare Meshy API payload
-            payload = {
-                "image_url": image_data_uri,
-                "enable_pbr": False,
-                "should_remesh": True,
-                "should_texture": True
-            }
-
-            # Create Meshy API task
-            app.logger.info("Creating task with Meshy API")
+            payload = {"image_url": image_data_uri, "enable_pbr": False, "should_remesh": True, "should_texture": True}
             response = requests.post("https://api.meshy.ai/openapi/v1/image-to-3d", json=payload, headers=HEADERS)
             response.raise_for_status()
             task_data = response.json()
@@ -180,8 +171,7 @@ def upload():
                 return redirect(url_for('upload'))
             app.logger.info(f"Task created: {task_id}")
 
-            # Poll for task completion
-            max_attempts = 60  # 10 minutes with 10-second intervals
+            max_attempts = 60
             attempt = 0
             while attempt < max_attempts:
                 time.sleep(10)
@@ -190,7 +180,6 @@ def upload():
                 status = task_status.get("status")
                 progress = task_status.get("progress", 0)
                 app.logger.info(f"Task status: {status}, Progress: {progress}%")
-
                 if status == "SUCCEEDED":
                     model_urls = task_status.get("model_urls", {})
                     glb_url = model_urls.get("glb")
@@ -235,10 +224,17 @@ def models():
     user_models = Model.query.filter_by(user_id=current_user.id).all()
     return render_template('models.html', models=user_models)
 
-# Initialize database
+# Initialize database with debugging
 with app.app_context():
-    app.logger.info("Creating database tables...")
+    app.logger.info(f"Using DATABASE_URL: {app.config['SQLALCHEMY_DATABASE_URI']}")
+    app.logger.info("Attempting to create database tables...")
     db.create_all()
+    inspector = inspect(db.engine)
+    if 'User' in inspector.get_table_names():
+        columns = inspector.get_columns('User')
+        app.logger.info(f"User table columns: {[(col['name'], col['type']) for col in columns]}")
+    else:
+        app.logger.error("User table not found after db.create_all()")
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080)
