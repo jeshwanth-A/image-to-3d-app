@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Your 3D Models</title>
+</head>
+<body>
+    <h1>Your 3D Models</h1>
+    {% with messages = get_flashed_messages() %}
+        {% if messages %}
+            {% for message in messages %}
+                <p style="color: green;">{{ message }}</p>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+    {% if models %}
+        <table border="1">
+            <thead>
+                <tr>
+                    <th>Image</th>
+                    <th>3D Model</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for model in models %}
+                    <tr>
+                        <td><a href="{{ model.image_url }}" target="_blank">View Image</a></td>
+                        <td>
+                            {% if model.model_url %}
+                                <a href="{{ model.model_url }}" target="_blank">View Model</a>
+                            {% else %}
+                                Processing...
+                            {% endif %}
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p>No models yet. <a href="{{ url_for('upload') }}">Upload an image</a> to get started!</p>
+    {% endif %}
+    <p>
+        <a href="{{ url_for('upload') }}">Upload Another Image</a> |
+        <a href="{{ url_for('logout') }}">Logout</a>
+    </p>
+</body>
+</html>

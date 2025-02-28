@@ -1,28 +1,39 @@
+import logging
+import time
+import base64
 from flask import Flask, render_template, redirect, url_for, flash, request
 from flask_sqlalchemy import SQLAlchemy
-from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
+from flask_login import LoginManager, UserMixin, login_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_wtf import FlaskForm
 from wtforms import StringField, PasswordField, FileField, SubmitField
 from wtforms.validators import DataRequired, EqualTo
 import os
 from google.cloud import storage
-import requests #check
+import requests
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.environ['FLASK_SECRET_KEY']
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ['DATABASE_URL']
+app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'default-secret-key-for-dev')
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///app.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
+
+# Load API Key
+API_KEY = os.getenv("MESHY_API_KEY")
+if not API_KEY:
+    app.logger.error("MESHY_API_KEY environment variable is not set.")
+    raise ValueError("MESHY_API_KEY is required.")
+HEADERS = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
 
 # Models
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(64), unique=True, nullable=False)
     password_hash = db.Column(db.String(128), nullable=False)
-    is_admin = db.Column(db.Boolean, default=False)
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -56,6 +67,11 @@ class UploadForm(FlaskForm):
     image = FileField('Image', validators=[DataRequired()])
     submit = SubmitField('Upload')
 
+# Helper Function
+def image_to_data_uri(image_bytes: bytes, content_type: str) -> str:
+    base64_data = base64.b64encode(image_bytes).decode("utf-8")
+    return f"data:{content_type};base64,{base64_data}"
+
 # Routes
 @app.route('/')
 def index():
@@ -65,27 +81,15 @@ def index():
 def signup():
     form = SignupForm()
     if form.validate_on_submit():
-        try:
-            if User.query.filter_by(username=form.username.data).first():
-                flash('Username already exists.')
-                return redirect(url_for('signup'))
-            
-            user = User(username=form.username.data)
-            user.set_password(form.password.data)
-            db.session.add(user)
-            db.session.commit()
-            flash('Account created successfully!')
-            return redirect(url_for('login'))
-        except Exception as e:
-            db.session.rollback()
-            app.logger.error(f"Error during signup: {str(e)}")
-            flash('An error occurred during signup. Please try again.')
-    elif request.method == 'POST':
-        # This runs when form validation fails
-        for field, errors in form.errors.items():
-            for error in errors:
-                flash(f"{getattr(form, field).label.text}: {error}")
-                
+        if User.query.filter_by(username=form.username.data).first():
+            flash('Username already exists.')
+            return redirect(url_for('signup'))
+        user = User(username=form.username.data)
+        user.set_password(form.password.data)
+        db.session.add(user)
+        db.session.commit()
+        flash('Account created successfully!')
+        return redirect(url_for('login'))
     return render_template('signup.html', form=form)
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -110,32 +114,86 @@ def logout():
 def upload():
     form = UploadForm()
     if form.validate_on_submit():
-        storage_client = storage.Client()
-        bucket = storage_client.bucket(os.environ['BUCKET_NAME'])
-        filename = f'images/{current_user.id}/{form.image.data.filename}'
-        blob = bucket.blob(filename)
-        blob.upload_from_file(form.image.data)
-        image_url = blob.public_url
+        try:
+            app.logger.info(f"Uploading image for user {current_user.id}")
+            image_file = form.image.data
+            image_bytes = image_file.read()
 
-        meshy_api_key = os.environ['MESHY_API_KEY']
-        response = requests.post('https://api.meshy.ai/v1/models',  # Replace with actual Meshy API endpoint
-                                 headers={'Authorization': f'Bearer {meshy_api_key}'},
-                                 json={'image_url': image_url})
-        if response.status_code == 200:
-            model_data = response.json()
-            model_url = model_data.get('model_url')  # Adjust based on actual Meshy API response
-            model_blob = bucket.blob(f'models/{current_user.id}/{form.image.data.filename}.glb')
-            model_blob.upload_from_string(requests.get(model_url).content)
-            model_url = model_blob.public_url
-        else:
-            flash('Failed to generate 3D model.')
-            model_url = None
+            # Upload image to GCS
+            storage_client = storage.Client()
+            bucket = storage_client.bucket(os.environ['BUCKET_NAME'])
+            filename = f'images/{current_user.id}/{image_file.filename}'
+            blob = bucket.blob(filename)
+            blob.upload_from_string(image_bytes, content_type=image_file.content_type)
+            image_url = blob.public_url
+            app.logger.info(f"Image uploaded to {image_url}")
 
-        model = Model(user_id=current_user.id, image_url=image_url, model_url=model_url)
-        db.session.add(model)
-        db.session.commit()
-        flash('Image uploaded and model generated!')
-        return redirect(url_for('models'))
+            # Convert image to Data URI
+            image_data_uri = image_to_data_uri(image_bytes, image_file.content_type)
+
+            # Prepare Meshy API payload
+            payload = {
+                "image_url": image_data_uri,
+                "enable_pbr": False,
+                "should_remesh": True,
+                "should_texture": True
+            }
+
+            # Create Meshy API task
+            app.logger.info("Creating task with Meshy API")
+            response = requests.post("https://api.meshy.ai/openapi/v1/image-to-3d", json=payload, headers=HEADERS)
+            response.raise_for_status()
+            task_data = response.json()
+            task_id = task_data.get("result")
+            if not task_id:
+                flash("Task ID not received from API.")
+                return redirect(url_for('upload'))
+            app.logger.info(f"Task created: {task_id}")
+
+            # Poll for task completion
+            max_attempts = 60  # 10 minutes with 10-second intervals
+            attempt = 0
+            while attempt < max_attempts:
+                time.sleep(10)
+                task_response = requests.get(f"https://api.meshy.ai/openapi/v1/image-to-3d/{task_id}", headers=HEADERS)
+                task_status = task_response.json()
+                status = task_status.get("status")
+                progress = task_status.get("progress", 0)
+                app.logger.info(f"Task status: {status}, Progress: {progress}%")
+
+                if status == "SUCCEEDED":
+                    model_urls = task_status.get("model_urls", {})
+                    glb_url = model_urls.get("glb")
+                    if glb_url:
+                        app.logger.info(f"Model URL: {glb_url}")
+                        # Download the GLB file
+                        model_response = requests.get(glb_url)
+                        model_content = model_response.content
+                        # Upload to GCS
+                        model_filename = f'models/{current_user.id}/{image_file.filename}.glb'
+                        model_blob = bucket.blob(model_filename)
+                        model_blob.upload_from_string(model_content, content_type='model/gltf-binary')
+                        model_url = model_blob.public_url
+                        app.logger.info(f"Model uploaded to {model_url}")
+                        # Save to database
+                        model = Model(user_id=current_user.id, image_url=image_url, model_url=model_url)
+                        db.session.add(model)
+                        db.session.commit()
+                        flash('Image uploaded and model generated!')
+                        return redirect(url_for('models'))
+                    else:
+                        flash('Model URL not found in API response.')
+                        return redirect(url_for('upload'))
+                elif status in ["FAILED", "CANCELED"]:
+                    flash(f'Task {status.lower()}.')
+                    return redirect(url_for('upload'))
+                attempt += 1
+            flash('Task is taking longer than expected. Please check back later.')
+            return redirect(url_for('models'))
+        except Exception as e:
+            app.logger.error(f"Error in upload route: {str(e)}", exc_info=True)
+            flash('An error occurred during upload. Please try again.')
+            return redirect(url_for('upload'))
     return render_template('upload.html', form=form)
 
 @app.route('/models')
@@ -144,16 +202,7 @@ def models():
     user_models = Model.query.filter_by(user_id=current_user.id).all()
     return render_template('models.html', models=user_models)
 
-@app.route('/admin')
-@login_required
-def admin():
-    if not current_user.is_admin:
-        flash('Access denied.')
-        return redirect(url_for('index'))
-    users = User.query.all()
-    return render_template('admin.html', users=users)
-
-# Create tables (run once manually if needed)
+# Create database tables
 with app.app_context():
     db.create_all()
 
