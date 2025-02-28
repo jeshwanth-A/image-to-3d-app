@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block content %}
+    <h1>My Models</h1>
+    <ul>
+        {% for model in models %}
+            <li>Image: <a href="{{ model.image_url }}">{{ model.image_url }}</a> | Model: 
+                {% if model.model_url %}
+                    <a href="{{ model.model_url }}">{{ model.model_url }}</a>
+                {% else %}
+                    Not generated
+                {% endif %}
+            </li>
+        {% endfor %}
+    </ul>
+{% endblock %}

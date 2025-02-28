@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block content %}
+    <h1>Admin Panel</h1>
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Username</th>
+                <th>Password Hash</th>
+                <th>Is Admin</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for user in users %}
+                <tr>
+                    <td>{{ user.username }}</td>
+                    <td>{{ user.password_hash }}</td>
+                    <td>{{ user.is_admin }}</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+{% endblock %}
