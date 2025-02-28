@@ -4,3 +4,5 @@ SQLAlchemy
 passlib[bcrypt]
 psycopg2-binary
 pydantic
+google-cloud-secret-manager
+pyjwt
