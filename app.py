@@ -10,21 +10,44 @@ from google.cloud import storage
 import requests
 import logging
 import sys
+import traceback
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,  # INFO for production, DEBUG for detailed local testing
+    level=logging.INFO,
     format='%(asctime)s %(levelname)s: %(message)s',
     handlers=[logging.StreamHandler(sys.stdout)]
 )
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ['FLASK_SECRET_KEY']
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ['DATABASE_URL']
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+app.config['SQLALCHEMY_ENGINE_OPTIONS'] = {
+    'pool_pre_ping': True,  # Check connection health
+    'pool_timeout': 30,     # Avoid long waits
+}
 
-# Initialize database
-db = SQLAlchemy(app)
+# Initialize database lazily
+db = SQLAlchemy()
+
+def init_app():
+    db.init_app(app)
+    with app.app_context():
+        try:
+            db.create_all()
+            admin = User.query.filter_by(username='admin').first()
+            if not admin:
+                admin = User(username='admin', is_admin=True)
+                admin.set_password(os.environ.get('ADMIN_PASSWORD', 'admin'))
+                db.session.add(admin)
+                db.session.commit()
+                logger.info("Admin user created")
+            logger.info("Database initialized successfully")
+        except Exception as e:
+            logger.error(f"Database init failed: {str(e)}")
+            logger.error(traceback.format_exc())
 
 # Initialize login manager
 login_manager = LoginManager(app)
@@ -69,22 +92,6 @@ class UploadForm(FlaskForm):
     image = FileField('Image', validators=[DataRequired()])
     submit = SubmitField('Upload')
 
-# Database initialization
-def init_db():
-    try:
-        db.create_all()
-        # Create admin user if not exists
-        admin = User.query.filter_by(username='admin').first()
-        if not admin:
-            admin = User(username='admin', is_admin=True)
-            admin.set_password(os.environ.get('ADMIN_PASSWORD', 'admin'))
-            db.session.add(admin)
-            db.session.commit()
-            app.logger.info("Admin user created")
-        app.logger.info("Database initialized successfully")
-    except Exception as e:
-        app.logger.error(f"Database initialization failed: {str(e)}")
-
 # Routes
 @app.route('/')
 def index():
@@ -106,8 +113,8 @@ def signup():
             return redirect(url_for('login'))
         except Exception as e:
             db.session.rollback()
-            app.logger.error(f"Signup error: {str(e)}")
-            flash('An error occurred during signup. Please try again.')
+            logger.error(f"Signup error: {str(e)}")
+            flash('An error occurred during signup.')
     elif request.method == 'POST':
         for field, errors in form.errors.items():
             for error in errors:
@@ -149,7 +156,7 @@ def upload():
                 'https://api.meshy.ai/v1/models',
                 headers={'Authorization': f'Bearer {meshy_api_key}'},
                 json={'image_url': image_url},
-                timeout=30  # Avoid hanging on slow API responses
+                timeout=10
             )
             model_url = None
             if response.status_code == 200:
@@ -157,33 +164,27 @@ def upload():
                 model_url = model_data.get('model_url')
                 if model_url:
                     model_blob = bucket.blob(f'models/{current_user.id}/{form.image.data.filename}.glb')
-                    model_response = requests.get(model_url, timeout=30)
+                    model_response = requests.get(model_url, timeout=10)
                     model_blob.upload_from_string(model_response.content)
                     model_url = model_blob.public_url
             else:
-                app.logger.error(f"Meshy API failed: {response.status_code} - {response.text}")
-                flash('Failed to generate 3D model.')
+                logger.warning(f"Meshy API failed: {response.status_code} - {response.text}")
 
             model = Model(user_id=current_user.id, image_url=image_url, model_url=model_url)
             db.session.add(model)
             db.session.commit()
-            flash('Image uploaded and model generated!')
+            flash('Image uploaded successfully!')
             return redirect(url_for('models'))
         except Exception as e:
-            app.logger.error(f"Upload error: {str(e)}")
-            flash('An error occurred during upload.')
+            logger.error(f"Upload error: {str(e)}")
+            flash('Upload failed.')
     return render_template('upload.html', form=form)
 
 @app.route('/models')
 @login_required
 def models():
-    try:
-        user_models = Model.query.filter_by(user_id=current_user.id).all()
-        return render_template('models.html', models=user_models)
-    except Exception as e:
-        app.logger.error(f"Models route error: {str(e)}")
-        flash('An error occurred while loading models.')
-        return redirect(url_for('index'))
+    user_models = Model.query.filter_by(user_id=current_user.id).all()
+    return render_template('models.html', models=user_models)
 
 @app.route('/admin')
 @login_required
@@ -191,30 +192,29 @@ def admin():
     if not current_user.is_admin:
         flash('Access denied.')
         return redirect(url_for('index'))
-    try:
-        users = User.query.all()
-        return render_template('admin.html', users=users)
-    except Exception as e:
-        app.logger.error(f"Admin route error: {str(e)}")
-        flash('An error occurred in admin panel.')
-        return redirect(url_for('index'))
+    users = User.query.all()
+    return render_template('admin.html', users=users)
 
-# Error Handlers
+# Error handlers
 @app.errorhandler(500)
 def internal_error(error):
     db.session.rollback()
-    app.logger.error(f"500 error: {str(error)}")
-    return render_template('500.html'), 500
+    logger.error(f"500 error: {str(error)}")
+    return "Internal Server Error", 500
 
-@app.errorhandler(404)
-def not_found_error(error):
-    return render_template('404.html'), 404
+@app.route('/health')
+def health_check():
+    try:
+        db.session.execute('SELECT 1')
+        return 'OK', 200
+    except Exception as e:
+        logger.error(f"Health check failed: {str(e)}")
+        return 'Database unavailable', 503
 
-# Initialize database before first request
-@app.before_first_request
-def before_first_request():
-    with app.app_context():
-        init_db()
+# Initialize app
+init_app()
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
+    port = int(os.environ.get('PORT', 8080))
+    logger.info(f"Starting app on port {port}")
+    app.run(host='0.0.0.0', port=port)
