@@ -13,7 +13,7 @@ import sys
 
 # Configure logging
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,  # Use INFO for production; DEBUG for development
     format='%(asctime)s %(levelname)s: %(message)s',
     handlers=[logging.StreamHandler(sys.stdout)]
 )
@@ -84,8 +84,7 @@ def init_db():
         app.logger.info("Database initialized successfully")
     except Exception as e:
         app.logger.error(f"Database initialization error: {str(e)}")
-        if 'sqlite' not in app.config['SQLALCHEMY_DATABASE_URI']:
-            sys.exit(1)
+        # Do not exit; let the app continue running with an error state
 
 # Routes
 @app.route('/')
@@ -96,7 +95,7 @@ def index():
 def favicon():
     return send_from_directory(os.path.join(app.root_path, 'static'),
                                'favicon.ico', mimetype='image/vnd.microsoft.icon')
-    
+
 @app.route('/signup', methods=['GET', 'POST'])
 def signup():
     form = SignupForm()
@@ -107,10 +106,15 @@ def signup():
             return redirect(url_for('signup'))
         user = User(username=form.username.data)
         user.set_password(form.password.data)
-        db.session.add(user)
-        db.session.commit()
-        flash('Account created successfully!')
-        return redirect(url_for('login'))
+        try:
+            db.session.add(user)
+            db.session.commit()
+            flash('Account created successfully!')
+            return redirect(url_for('login'))
+        except Exception as e:
+            db.session.rollback()
+            app.logger.error(f"Signup error: {str(e)}")
+            flash('An error occurred during signup.')
     return render_template('signup.html', form=form)
 
 @app.route('/login', methods=['GET', 'POST'])
@@ -135,32 +139,42 @@ def logout():
 def upload():
     form = UploadForm()
     if form.validate_on_submit():
-        storage_client = storage.Client()
-        bucket = storage_client.bucket(os.environ['BUCKET_NAME'])
-        filename = f'images/{current_user.id}/{form.image.data.filename}'
-        blob = bucket.blob(filename)
-        blob.upload_from_file(form.image.data)
-        image_url = blob.public_url
-        
-        meshy_api_key = os.environ['MESHY_API_KEY']
-        response = requests.post('https://api.meshy.ai/v1/models',
-                                 headers={'Authorization': f'Bearer {meshy_api_key}'},
-                                 json={'image_url': image_url})
-        model_url = None
-        if response.status_code == 200:
-            model_data = response.json()
-            model_url = model_data.get('model_url')
-            model_blob = bucket.blob(f'models/{current_user.id}/{form.image.data.filename}.glb')
-            model_blob.upload_from_string(requests.get(model_url).content)
-            model_url = model_blob.public_url
-        else:
-            flash('Failed to generate 3D model.')
-        
-        model = Model(user_id=current_user.id, image_url=image_url, model_url=model_url)
-        db.session.add(model)
-        db.session.commit()
-        flash('Image uploaded and model generated!')
-        return redirect(url_for('models'))
+        try:
+            storage_client = storage.Client()
+            bucket = storage_client.bucket(os.environ['BUCKET_NAME'])
+            filename = f'images/{current_user.id}/{form.image.data.filename}'
+            blob = bucket.blob(filename)
+            blob.upload_from_file(form.image.data)
+            image_url = blob.public_url
+
+            meshy_api_key = os.environ['MESHY_API_KEY']
+            response = requests.post(
+                'https://api.meshy.ai/v1/models',
+                headers={'Authorization': f'Bearer {meshy_api_key}'},
+                json={'image_url': image_url},
+                timeout=30  # Prevent hanging on slow API responses
+            )
+            model_url = None
+            if response.status_code == 200:
+                model_data = response.json()
+                model_url = model_data.get('model_url')
+                if model_url:
+                    model_blob = bucket.blob(f'models/{current_user.id}/{form.image.data.filename}.glb')
+                    model_response = requests.get(model_url, timeout=30)
+                    model_blob.upload_from_string(model_response.content)
+                    model_url = model_blob.public_url
+            else:
+                app.logger.error(f"Meshy API failed: {response.status_code} - {response.text}")
+                flash('Failed to generate 3D model.')
+
+            model = Model(user_id=current_user.id, image_url=image_url, model_url=model_url)
+            db.session.add(model)
+            db.session.commit()
+            flash('Image uploaded and model generated!')
+            return redirect(url_for('models'))
+        except Exception as e:
+            app.logger.error(f"Upload error: {str(e)}")
+            flash('An error occurred during upload.')
     return render_template('upload.html', form=form)
 
 @app.route('/models')
