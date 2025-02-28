@@ -15,4 +15,4 @@ ENV/
 *.swp
 *.swo
 .DS_Store
-users.json
+# Don't exclude users.json anymore since we need to copy it into the container

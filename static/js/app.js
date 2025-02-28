@@ -1,138 +1,117 @@
 document.addEventListener('DOMContentLoaded', function() {
-    // Common elements that might be in the DOM
-    const loginBtn = document.getElementById('login-btn');
-    const signupBtn = document.getElementById('signup-btn');
-    const logoutBtn = document.getElementById('logout-btn');
-    const errorMessage = document.getElementById('error-message');
-    const userTableBody = document.getElementById('user-table-body');
+    // Cache DOM elements
+    const elements = {
+        loginBtn: document.getElementById('login-btn'),
+        signupBtn: document.getElementById('signup-btn'),
+        logoutBtn: document.getElementById('logout-btn'),
+        errorMessage: document.getElementById('error-message'),
+        userTableBody: document.getElementById('user-table-body'),
+        currentPath: window.location.pathname
+    };
     
-    // Determine current page
-    const currentPath = window.location.pathname;
+    // Initialize functionality based on page context
+    initPage(elements);
     
-    // ======================================
-    // LOGIN FUNCTIONALITY
-    // ======================================
-    if (loginBtn) {
-        loginBtn.addEventListener('click', async function() {
-            const username = document.getElementById('username').value;
-            const password = document.getElementById('password').value;
-            
-            // Simple validation
-            if (!username || !password) {
-                errorMessage.textContent = 'Please fill in all fields';
-                return;
-            }
-            
-            try {
-                const response = await fetch('/api/login', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ username, password })
-                });
-                
-                const data = await response.json();
-                
-                if (response.ok) {
-                    // Login successful
-                    errorMessage.textContent = '';
-                    
-                    // Redirect based on user type
-                    if (data.is_admin) {
-                        window.location.href = '/admin';
-                    } else {
-                        window.location.href = '/dashboard';
-                    }
-                } else {
-                    // Login failed
-                    errorMessage.textContent = data.message || 'Login failed. Please check your credentials.';
-                }
-            } catch (error) {
-                console.error('Error during login:', error);
-                errorMessage.textContent = 'An error occurred. Please try again.';
-            }
-        });
-    }
-
-    // ======================================
-    // SIGNUP FUNCTIONALITY
-    // ======================================
-    if (signupBtn) {
-        signupBtn.addEventListener('click', async function() {
-            const username = document.getElementById('username').value;
-            const email = document.getElementById('email').value;
-            const password = document.getElementById('password').value;
-            
-            // Simple validation
-            if (!username || !email || !password) {
-                errorMessage.textContent = 'Please fill in all fields';
-                return;
-            }
-            
-            if (password.length < 6) {
-                errorMessage.textContent = 'Password must be at least 6 characters long';
-                return;
-            }
-            
-            try {
-                const response = await fetch('/api/signup', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ username, email, password })
-                });
-                
-                const data = await response.json();
-                
-                if (response.ok) {
-                    // Signup successful
-                    alert('Account created successfully! Please login.');
-                    window.location.href = '/login';
-                } else {
-                    // Signup failed
-                    errorMessage.textContent = data.message || 'Signup failed. Please try again.';
-                }
-            } catch (error) {
-                console.error('Error during signup:', error);
-                errorMessage.textContent = 'An error occurred. Please try again.';
-            }
-        });
-    }
-
-    // ======================================
-    // ADMIN FUNCTIONALITY
-    // ======================================
-    if (currentPath === '/admin') {
-        // Check if user is authorized to view admin panel
-        checkAdminAuthorization();
+    // Main initialization function
+    function initPage(elements) {
+        // Login page functionality
+        if (elements.loginBtn) {
+            elements.loginBtn.addEventListener('click', () => handleLogin(elements));
+        }
         
-        // Load all users
-        loadUsers();
+        // Signup page functionality
+        if (elements.signupBtn) {
+            elements.signupBtn.addEventListener('click', () => handleSignup(elements));
+        }
         
-        // Logout functionality for admin page
-        if (logoutBtn) {
-            logoutBtn.addEventListener('click', handleLogout);
+        // Admin page functionality
+        if (elements.currentPath === '/admin') {
+            checkAdminAuthorization();
+            loadUsers(elements.userTableBody);
+        }
+        
+        // Logout button (on any page)
+        if (elements.logoutBtn) {
+            elements.logoutBtn.addEventListener('click', handleLogout);
         }
     }
-
-    // ======================================
-    // UTILITY FUNCTIONS
-    // ======================================
     
-    // Logout functionality (can be used from any page)
-    if (logoutBtn) {
-        logoutBtn.addEventListener('click', handleLogout);
+    // Login handler
+    async function handleLogin(elements) {
+        const username = document.getElementById('username').value.trim();
+        const password = document.getElementById('password').value;
+        
+        // Validate input
+        if (!username || !password) {
+            elements.errorMessage.textContent = 'Please fill in all fields';
+            return;
+        }
+        
+        try {
+            const response = await fetch('/api/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password })
+            });
+            
+            const data = await response.json();
+            
+            if (response.ok) {
+                elements.errorMessage.textContent = '';
+                window.location.href = data.is_admin ? '/admin' : '/dashboard';
+            } else {
+                elements.errorMessage.textContent = data.message || 'Login failed. Please check your credentials.';
+            }
+        } catch (error) {
+            console.error('Error during login:', error);
+            elements.errorMessage.textContent = 'An error occurred. Please try again.';
+        }
     }
     
+    // Signup handler
+    async function handleSignup(elements) {
+        const username = document.getElementById('username').value.trim();
+        const email = document.getElementById('email').value.trim();
+        const password = document.getElementById('password').value;
+        
+        // Validate input
+        if (!username || !email || !password) {
+            elements.errorMessage.textContent = 'Please fill in all fields';
+            return;
+        }
+        
+        if (password.length < 6) {
+            elements.errorMessage.textContent = 'Password must be at least 6 characters long';
+            return;
+        }
+        
+        try {
+            const response = await fetch('/api/signup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, email, password })
+            });
+            
+            const data = await response.json();
+            
+            if (response.ok) {
+                alert('Account created successfully! Please login.');
+                window.location.href = '/login';
+            } else {
+                elements.errorMessage.textContent = data.message || 'Signup failed. Please try again.';
+            }
+        } catch (error) {
+            console.error('Error during signup:', error);
+            elements.errorMessage.textContent = 'An error occurred. Please try again.';
+        }
+    }
+    
+    // Logout handler
     async function handleLogout() {
         try {
             const response = await fetch('/api/logout', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                }
+                headers: { 'Content-Type': 'application/json' }
             });
             
             if (response.ok) {
@@ -143,13 +122,13 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
     
+    // Admin authorization check
     async function checkAdminAuthorization() {
         try {
             const response = await fetch('/api/check-admin');
             const data = await response.json();
             
             if (!response.ok || !data.is_admin) {
-                // Not authorized, redirect to login
                 alert('You are not authorized to view this page.');
                 window.location.href = '/login';
             }
@@ -159,39 +138,22 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
     
-    async function loadUsers() {
-        if (!userTableBody) return;
+    // Load users table
+    async function loadUsers(tableBody) {
+        if (!tableBody) return;
         
         try {
             const response = await fetch('/api/users');
             const users = await response.json();
             
             if (response.ok) {
-                // Clear existing table content
-                userTableBody.innerHTML = '';
+                // Clear and rebuild table
+                tableBody.innerHTML = '';
                 
-                // Add user data to table
+                // Create and append user rows
                 users.forEach(user => {
-                    const row = document.createElement('tr');
-                    
-                    const usernameCell = document.createElement('td');
-                    usernameCell.textContent = user.username;
-                    
-                    const emailCell = document.createElement('td');
-                    emailCell.textContent = user.email;
-                    
-                    const passwordCell = document.createElement('td');
-                    passwordCell.textContent = user.password;
-                    
-                    const createdAtCell = document.createElement('td');
-                    createdAtCell.textContent = new Date(user.created_at).toLocaleString();
-                    
-                    row.appendChild(usernameCell);
-                    row.appendChild(emailCell);
-                    row.appendChild(passwordCell);
-                    row.appendChild(createdAtCell);
-                    
-                    userTableBody.appendChild(row);
+                    const row = createUserTableRow(user);
+                    tableBody.appendChild(row);
                 });
             } else {
                 console.error('Failed to load users');
@@ -199,5 +161,24 @@ document.addEventListener('DOMContentLoaded', function() {
         } catch (error) {
             console.error('Error loading users:', error);
         }
+    }
+    
+    // Create user table row
+    function createUserTableRow(user) {
+        const row = document.createElement('tr');
+        
+        // Create cells with user data
+        ['username', 'email', 'password'].forEach(field => {
+            const cell = document.createElement('td');
+            cell.textContent = user[field];
+            row.appendChild(cell);
+        });
+        
+        // Add created_at date
+        const createdAtCell = document.createElement('td');
+        createdAtCell.textContent = new Date(user.created_at).toLocaleString();
+        row.appendChild(createdAtCell);
+        
+        return row;
     }
 });

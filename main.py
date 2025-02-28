@@ -4,37 +4,53 @@ import json
 from datetime import datetime
 import secrets
 from functools import wraps
+from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
-app.secret_key = secrets.token_hex(16)  # Generate a random secret key
+app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(16))
 
-# Data store (in a real app, you'd use a database)
-USERS_FILE = 'users.json'
+# Data store configuration
+USERS_FILE = os.environ.get('USERS_FILE', 'users.json')
+DATA_DIR = os.path.dirname(os.path.abspath(__file__))
+USERS_PATH = os.path.join(DATA_DIR, USERS_FILE)
 
 def load_users():
-    if os.path.exists(USERS_FILE):
-        with open(USERS_FILE, 'r') as f:
-            return json.load(f)
-    return []
+    """Load users from JSON file"""
+    try:
+        if os.path.exists(USERS_PATH):
+            with open(USERS_PATH, 'r') as f:
+                return json.load(f)
+        return []
+    except Exception as e:
+        print(f"Error loading users: {e}")
+        return []
 
 def save_users(users):
-    with open(USERS_FILE, 'w') as f:
-        json.dump(users, f, indent=2)
+    """Save users to JSON file"""
+    try:
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(USERS_PATH), exist_ok=True)
+        with open(USERS_PATH, 'w') as f:
+            json.dump(users, f, indent=2)
+        return True
+    except Exception as e:
+        print(f"Error saving users: {e}")
+        return False
 
 # Initialize with admin user if file doesn't exist
-if not os.path.exists(USERS_FILE):
+if not os.path.exists(USERS_PATH):
     initial_users = [
         {
             "username": "mvsr",
             "email": "admin@example.com",
-            "password": "admin123",
+            "password": generate_password_hash("admin123"),  # Hash the password
             "created_at": datetime.now().isoformat(),
             "is_admin": True
         }
     ]
     save_users(initial_users)
 
-# Authentication decorator
+# Authentication decorators
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -43,7 +59,6 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-# Admin decorator
 def admin_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -73,9 +88,12 @@ def signup_page():
 
 @app.route('/admin')
 def admin_page():
+    if 'username' not in session:
+        return redirect(url_for('login_page'))
     return render_template('admin.html')
 
 @app.route('/dashboard')
+@login_required
 def dashboard():
     return "Welcome to your dashboard!"
 
@@ -83,39 +101,43 @@ def dashboard():
 @app.route('/api/signup', methods=['POST'])
 def signup():
     data = request.json
-    username = data.get('username')
-    email = data.get('email')
-    password = data.get('password')
+    username = data.get('username', '').strip()
+    email = data.get('email', '').strip()
+    password = data.get('password', '')
     
+    # Validate input
     if not username or not email or not password:
         return jsonify({"message": "All fields are required"}), 400
+    
+    if len(password) < 6:
+        return jsonify({"message": "Password must be at least 6 characters"}), 400
     
     users = load_users()
     
     # Check if username already exists
-    for user in users:
-        if user['username'] == username:
-            return jsonify({"message": "Username already exists"}), 400
+    if any(user['username'] == username for user in users):
+        return jsonify({"message": "Username already exists"}), 400
     
-    # Add new user
+    # Add new user with hashed password
     new_user = {
         "username": username,
         "email": email,
-        "password": password,  # In a real app, hash this password!
+        "password": generate_password_hash(password),
         "created_at": datetime.now().isoformat(),
         "is_admin": False
     }
     
     users.append(new_user)
-    save_users(users)
-    
-    return jsonify({"message": "User created successfully"}), 201
+    if save_users(users):
+        return jsonify({"message": "User created successfully"}), 201
+    else:
+        return jsonify({"message": "Failed to create user"}), 500
 
 @app.route('/api/login', methods=['POST'])
 def login():
     data = request.json
-    username = data.get('username')
-    password = data.get('password')
+    username = data.get('username', '').strip()
+    password = data.get('password', '')
     
     if not username or not password:
         return jsonify({"message": "Username and password are required"}), 400
@@ -123,10 +145,27 @@ def login():
     users = load_users()
     
     for user in users:
-        if user['username'] == username and user['password'] == password:
-            session['username'] = username
-            is_admin = user.get('is_admin', False)
-            return jsonify({"message": "Login successful", "is_admin": is_admin}), 200
+        if user['username'] == username:
+            # First handle old plain text passwords (if any)
+            if 'is_hashed' not in user and user['password'] == password:
+                # Update to hashed password
+                user['password'] = generate_password_hash(password)
+                user['is_hashed'] = True
+                save_users(users)
+                session['username'] = username
+                return jsonify({
+                    "message": "Login successful",
+                    "is_admin": user.get('is_admin', False)
+                }), 200
+            # Then handle hashed passwords
+            elif check_password_hash(user['password'], password):
+                session['username'] = username
+                return jsonify({
+                    "message": "Login successful",
+                    "is_admin": user.get('is_admin', False)
+                }), 200
+            else:
+                break  # Username found but wrong password
     
     return jsonify({"message": "Invalid credentials"}), 401
 
@@ -151,7 +190,13 @@ def check_admin():
 @admin_required
 def get_users():
     users = load_users()
-    return jsonify(users), 200
+    # For security, mask actual passwords in the response
+    sanitized_users = []
+    for user in users:
+        sanitized_user = user.copy()
+        sanitized_user['password'] = '********' if user.get('is_admin', False) else user['password']
+        sanitized_users.append(sanitized_user)
+    return jsonify(sanitized_users), 200
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=False)
