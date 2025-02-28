@@ -36,7 +36,7 @@ HEADERS = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/js
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(64), unique=True, nullable=False)
-    password_hash = db.Column(db.String(256), nullable=False)  # Increased from 128 to 256 to prevent truncation
+    password_hash = db.Column(db.String(256), nullable=False)  # Fixed length to 256
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
