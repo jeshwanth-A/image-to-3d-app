@@ -24,4 +24,4 @@ steps:
       - '686596926199-compute@developer.gserviceaccount.com'
 options:
   logging: GCS_ONLY
-  logsBucket: 'gs://project-2-450420-images'ges'
+  logsBucket: 'gs://project-2-450420-images'
