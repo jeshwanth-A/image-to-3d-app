@@ -1,23 +1,35 @@
 # Build React Frontend
-FROM node:18 AS frontend
+FROM node:18-alpine AS frontend-build
 WORKDIR /app
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm install
 COPY frontend/ ./
 RUN npm run build
 
-# Set up Python Environment for FastAPI
-FROM python:3.9 AS backend
+# Final image
+FROM python:3.9-slim
 WORKDIR /app
-COPY backend/ /app/
+
+# Install nginx
+RUN apt-get update && apt-get install -y nginx && apt-get clean
+
+# Setup backend
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-EXPOSE 8000
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"] &
+COPY backend/ ./backend/
 
-# Set up Nginx
-FROM nginx:latest
-COPY --from=frontend /app/build /usr/share/nginx/html
-COPY nginx.conf /etc/nginx/nginx.conf
-EXPOSE 80
-CMD ["nginx", "-g", "daemon off;"]
+# Copy frontend build from the previous stage
+COPY --from=frontend-build /app/build /usr/share/nginx/html
+
+# Copy nginx config
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+# Create startup script
+COPY start.sh /app/start.sh
+RUN chmod +x /app/start.sh
+
+# Expose port - Cloud Run will override this with PORT env variable
+EXPOSE 8080
+
+# Start both services
+CMD ["/app/start.sh"]
