@@ -4,16 +4,29 @@ from flask_login import LoginManager, UserMixin, login_user, login_required, log
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_wtf import FlaskForm
 from wtforms import StringField, PasswordField, FileField, SubmitField
-from wtforms.validators import DataRequired, EqualTo
+from wtforms.validators import DataRequired, EqualTo, Length
 import os
 from google.cloud import storage
-import requests #check
+import requests
+import logging
+import sys
+
+# Configure logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s %(levelname)s: %(message)s',
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.environ['FLASK_SECRET_KEY']
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ['DATABASE_URL']
+app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'dev-key-for-testing')
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///site.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+# Initialize database with app
 db = SQLAlchemy(app)
+
+# Initialize login manager
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
 
@@ -42,8 +55,8 @@ def load_user(user_id):
 
 # Forms
 class SignupForm(FlaskForm):
-    username = StringField('Username', validators=[DataRequired()])
-    password = PasswordField('Password', validators=[DataRequired()])
+    username = StringField('Username', validators=[DataRequired(), Length(min=3, max=64)])
+    password = PasswordField('Password', validators=[DataRequired(), Length(min=6)])
     confirm_password = PasswordField('Confirm Password', validators=[DataRequired(), EqualTo('password')])
     submit = SubmitField('Sign Up')
 
@@ -56,6 +69,27 @@ class UploadForm(FlaskForm):
     image = FileField('Image', validators=[DataRequired()])
     submit = SubmitField('Upload')
 
+# Database initialization function
+def init_db():
+    try:
+        # Create all tables if they don't exist
+        with app.app_context():
+            db.create_all()
+            # Check if admin user exists, create if not
+            admin_user = User.query.filter_by(username='admin').first()
+            if not admin_user:
+                admin_user = User(username='admin', is_admin=True)
+                admin_user.set_password(os.environ.get('ADMIN_PASSWORD', 'admin'))
+                db.session.add(admin_user)
+                db.session.commit()
+                app.logger.info("Admin user created")
+        app.logger.info("Database initialized successfully")
+    except Exception as e:
+        app.logger.error(f"Database initialization error: {str(e)}")
+        # Exit application if database initialization fails in production
+        if 'sqlite' not in app.config['SQLALCHEMY_DATABASE_URI']:
+            sys.exit(1)
+
 # Routes
 @app.route('/')
 def index():
@@ -66,22 +100,33 @@ def signup():
     form = SignupForm()
     if form.validate_on_submit():
         try:
-            if User.query.filter_by(username=form.username.data).first():
+            app.logger.info(f"Attempting signup for user: {form.username.data}")
+            existing_user = User.query.filter_by(username=form.username.data).first()
+            
+            if existing_user:
                 flash('Username already exists.')
                 return redirect(url_for('signup'))
             
+            # Create new user
             user = User(username=form.username.data)
             user.set_password(form.password.data)
+            
+            # Add to session and commit
             db.session.add(user)
             db.session.commit()
+            
+            app.logger.info(f"User created successfully: {user.username}")
             flash('Account created successfully!')
             return redirect(url_for('login'))
+            
         except Exception as e:
             db.session.rollback()
             app.logger.error(f"Error during signup: {str(e)}")
             flash('An error occurred during signup. Please try again.')
-    elif request.method == 'POST':
-        # This runs when form validation fails
+    
+    # Handle form validation errors
+    if form.errors:
+        app.logger.debug(f"Form validation errors: {form.errors}")
         for field, errors in form.errors.items():
             for error in errors:
                 flash(f"{getattr(form, field).label.text}: {error}")
@@ -153,9 +198,11 @@ def admin():
     users = User.query.all()
     return render_template('admin.html', users=users)
 
-# Create tables (run once manually if needed)
-with app.app_context():
-    db.create_all()
+# Initialize database before first request
+@app.before_first_request
+def before_first_request():
+    init_db()
 
 if __name__ == '__main__':
+    init_db()  # Initialize database when running directly
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))

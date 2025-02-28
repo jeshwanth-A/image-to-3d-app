@@ -35,4 +35,9 @@
         </div>
         {{ form.submit(class="btn btn-primary") }}
     </form>
+    <div class="debug">
+        <h2>Debug Information</h2>
+        <pre>{{ form.errors }}</pre>
+        <pre>{{ form.data }}</pre>
+    </div>
 {% endblock %}
