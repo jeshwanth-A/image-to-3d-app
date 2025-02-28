@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Image to 3D App{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+</head>
+<body>
+    <header>
+        <h1>Image to 3D App</h1>
+        <nav>
+            <ul>
+                <li><a href="{{ url_for('main.index') }}">Home</a></li>
+                <li><a href="{{ url_for('auth.login') }}">Login</a></li>
+                <li><a href="{{ url_for('auth.signup') }}">Sign Up</a></li>
+                <li><a href="{{ url_for('user.account') }}">Account</a></li>
+                <li><a href="{{ url_for('admin.dashboard') }}">Admin Dashboard</a></li>
+            </ul>
+        </nav>
+    </header>
+    <main>
+        {% with messages = get_flashed_messages() %}
+            {% if messages %}
+                <ul class="flashes">
+                {% for message in messages %}
+                    <li>{{ message }}</li>
+                {% endfor %}
+                </ul>
+            {% endif %}
+        {% endwith %}
+        {% block content %}{% endblock %}
+    </main>
+    <footer>
+        <p>&copy; 2023 Image to 3D App</p>
+    </footer>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
