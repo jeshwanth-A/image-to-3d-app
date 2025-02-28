@@ -1,0 +1,11 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/project-1', '.']
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/project-1']
+  - name: 'gcr.io/google.com/cloudsdktool/gcloud'
+    args: ['run', 'deploy', 'project-1', '--image', 'gcr.io/$PROJECT_ID/project-1', '--region', 'us-central1', '--platform', 'managed']
+options:
+  logging: GCS_ONLY
+  logsBucket: 'gs://project-2-450420-images'
+  serviceAccount: 'projects/project-2-450420/serviceAccounts/YOUR_SERVICE_ACCOUNT_EMAIL'
