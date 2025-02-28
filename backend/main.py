@@ -11,7 +11,6 @@ from pydantic import BaseModel
 import jwt
 from datetime import datetime, timedelta
 
-# Initialize FastAPI app
 app = FastAPI()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -50,15 +49,12 @@ class User(Base):
     email = Column(String, unique=True, index=True, nullable=False)
     password = Column(String, nullable=False)
 
-# Create tables
 Base.metadata.create_all(bind=engine)
 
-# Pydantic Models
 class UserCreate(BaseModel):
     email: str
     password: str
 
-# Dependency Injection for DB Session
 def get_db():
     db = SessionLocal()
     try:
@@ -66,32 +62,26 @@ def get_db():
     finally:
         db.close()
 
-# JWT Token Generation
 def create_jwt(email: str):
     expiration = datetime.utcnow() + timedelta(hours=12)
     payload = {"sub": email, "exp": expiration}
     token = jwt.encode(payload, SECRET_KEY, algorithm="HS256")
     return token
 
-# Signup Route
-@app.post("/signup")
+@app.post("/api/signup")
 def signup(user: UserCreate, db: Session = Depends(get_db)):
     existing_user = db.query(User).filter(User.email == user.email).first()
     if existing_user:
         raise HTTPException(status_code=400, detail="User already exists")
-
     hashed_password = pwd_context.hash(user.password)
     new_user = User(email=user.email, password=hashed_password)
     db.add(new_user)
     db.commit()
-
     return {"message": "User signed up!", "token": create_jwt(user.email)}
 
-# Login Route
-@app.post("/login")
+@app.post("/api/login")
 def login(user: UserCreate, db: Session = Depends(get_db)):
     existing_user = db.query(User).filter(User.email == user.email).first()
     if not existing_user or not pwd_context.verify(user.password, existing_user.password):
         raise HTTPException(status_code=401, detail="Invalid credentials")
-
     return {"message": "Login successful!", "token": create_jwt(user.email)}
