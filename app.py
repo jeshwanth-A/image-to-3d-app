@@ -126,7 +126,19 @@ def admin_panel():
         return redirect(url_for('index'))
     users = User.query.all()
     models = Model.query.all()
-    return render_template('admin_panel.html', users=users, models=models)
+    # Create a list of model details with usernames
+    model_details = [
+        {
+            'id': model.id,
+            'user_id': model.user_id,
+            'username': User.query.get(model.user_id).username,
+            'image_url': model.image_url,
+            'model_url': model.model_url,
+            'task_id': model.task_id
+        }
+        for model in models
+    ]
+    return render_template('admin_panel.html', users=users, models=model_details)
 
 # ... (Other routes like /upload, /status, /models remain unchanged)
 
@@ -221,7 +233,9 @@ def status(model_id):
                 bucket = storage_client.bucket(os.environ['BUCKET_NAME'])
                 model_filename = f'models/{current_user.id}/{model.id}.glb'
                 model_blob = bucket.blob(model_filename)
+                # Upload and make public
                 model_blob.upload_from_string(model_content, content_type='model/gltf-binary')
+                model_blob.make_public()  # Set the object to be publicly readable
                 model.model_url = model_blob.public_url
                 db.session.commit()
                 app.logger.info(f"Model uploaded to {model.model_url}")

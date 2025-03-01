@@ -62,7 +62,7 @@
         <tr>
             <td>{{ model.id }}</td>
             <td>{{ model.user_id }}</td>
-            <td>{{ User.query.get(model.user_id).username }}</td>
+            <td>{{ model.username }}</td>  <!-- Use pre-fetched username -->
             <td><a href="{{ model.image_url }}">{{ model.image_url.split('/')[-1] }}</a></td>
             <td>
                 {% if model.model_url %}
