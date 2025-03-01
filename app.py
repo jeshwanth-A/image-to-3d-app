@@ -100,17 +100,35 @@ def signup():
             return redirect(url_for('signup'))
     return render_template('signup.html', form=form)
 
+# ... (Imports and initial setup remain unchanged)
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    # Unchanged login logic
     form = LoginForm()
     if form.validate_on_submit():
-        user = User.query.filter_by(username=form.username.data).first()
-        if user and user.check_password(form.password.data):
-            login_user(user)
-            return redirect(url_for('upload'))
-        flash('Invalid username or password.')
+        try:
+            user = User.query.filter_by(username=form.username.data).first()
+            if user and user.check_password(form.password.data):
+                login_user(user)
+                if user.is_admin:
+                    return redirect(url_for('admin_panel'))
+                return redirect(url_for('upload'))
+            flash('Invalid username or password.')
+        except Exception as e:
+            flash('An error occurred during login. Please try again.')
     return render_template('login.html', form=form)
+
+@app.route('/admin_panel')
+@login_required
+def admin_panel():
+    if not current_user.is_admin:
+        flash('Access denied. Admins only.')
+        return redirect(url_for('index'))
+    users = User.query.all()
+    models = Model.query.all()
+    return render_template('admin_panel.html', users=users, models=models)
+
+# ... (Other routes like /upload, /status, /models remain unchanged)
 
 @app.route('/logout')
 @login_required
@@ -225,7 +243,7 @@ def models():
     user_models = Model.query.filter_by(user_id=current_user.id).all()
     app.logger.info(f"Found {len(user_models)} models for user {current_user.id}")
     return render_template('models.html', models=user_models)
-
+"""
 @app.route('/admin')
 @login_required
 def admin():
@@ -234,7 +252,7 @@ def admin():
         return redirect(url_for('index'))
     users = User.query.all()
     return render_template('admin.html', users=users)
-
+"""
 # Initialize database
 with app.app_context():
     db.create_all()

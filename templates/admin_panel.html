@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Admin Panel</title>
+    <style>
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+    </style>
+</head>
+<body>
+    <h1>Admin Panel</h1>
+    {% with messages = get_flashed_messages() %}
+        {% if messages %}
+            {% for message in messages %}
+                <p>{{ message }}</p>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
+    <h2>Users</h2>
+    <table>
+        <tr>
+            <th>ID</th>
+            <th>Username</th>
+            <th>Is Admin</th>
+        </tr>
+        {% for user in users %}
+        <tr>
+            <td>{{ user.id }}</td>
+            <td>{{ user.username }}</td>
+            <td>{{ 'Yes' if user.is_admin else 'No' }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+
+    <h2>Models</h2>
+    <table>
+        <tr>
+            <th>ID</th>
+            <th>User ID</th>
+            <th>Username</th>
+            <th>Image URL</th>
+            <th>Model URL</th>
+            <th>Task ID</th>
+            <th>Status</th>
+        </tr>
+        {% for model in models %}
+        <tr>
+            <td>{{ model.id }}</td>
+            <td>{{ model.user_id }}</td>
+            <td>{{ User.query.get(model.user_id).username }}</td>
+            <td><a href="{{ model.image_url }}">{{ model.image_url.split('/')[-1] }}</a></td>
+            <td>
+                {% if model.model_url %}
+                    <a href="{{ model.model_url }}">{{ model.model_url.split('/')[-1] }}</a>
+                {% else %}
+                    Not Generated
+                {% endif %}
+            </td>
+            <td>{{ model.task_id or 'N/A' }}</td>
+            <td>
+                {% if model.model_url %}
+                    Completed
+                {% elif model.task_id %}
+                    Processing
+                {% else %}
+                    Pending
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </table>
+
+    <p><a href="{{ url_for('logout') }}">Logout</a></p>
+</body>
+</html>
