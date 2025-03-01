@@ -53,7 +53,7 @@ class Model(db.Model):
 def load_user(user_id):
     return User.query.get(int(user_id))
 
-# Forms (unchanged)
+# Forms
 class SignupForm(FlaskForm):
     username = StringField('Username', validators=[DataRequired()])
     password = PasswordField('Password', validators=[DataRequired()])
@@ -81,7 +81,6 @@ def index():
 
 @app.route('/signup', methods=['GET', 'POST'])
 def signup():
-    # Unchanged signup logic
     form = SignupForm()
     if form.validate_on_submit():
         try:
@@ -100,8 +99,6 @@ def signup():
             return redirect(url_for('signup'))
     return render_template('signup.html', form=form)
 
-# ... (Imports and initial setup remain unchanged)
-
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     form = LoginForm()
@@ -117,30 +114,6 @@ def login():
         except Exception as e:
             flash('An error occurred during login. Please try again.')
     return render_template('login.html', form=form)
-
-@app.route('/admin_panel')
-@login_required
-def admin_panel():
-    if not current_user.is_admin:
-        flash('Access denied. Admins only.')
-        return redirect(url_for('index'))
-    users = User.query.all()
-    models = Model.query.all()
-    # Create a list of model details with usernames
-    model_details = [
-        {
-            'id': model.id,
-            'user_id': model.user_id,
-            'username': User.query.get(model.user_id).username,
-            'image_url': model.image_url,
-            'model_url': model.model_url,
-            'task_id': model.task_id
-        }
-        for model in models
-    ]
-    return render_template('admin_panel.html', users=users, models=model_details)
-
-# ... (Other routes like /upload, /status, /models remain unchanged)
 
 @app.route('/logout')
 @login_required
@@ -159,7 +132,6 @@ def upload():
             image_bytes = image_file.read()
             app.logger.info("Image read successfully")
 
-            # Upload image to GCS
             storage_client = storage.Client()
             bucket = storage_client.bucket(os.environ['BUCKET_NAME'])
             filename = f'images/{current_user.id}/{image_file.filename}'
@@ -195,7 +167,6 @@ def upload():
             db.session.commit()
             flash(f"Task key generated: {task_id}")
             return redirect(url_for('models'))
-
         except requests.RequestException as e:
             app.logger.error(f"Meshy API error: {str(e)}")
             flash(f'Meshy API error: {str(e)}')
@@ -212,8 +183,21 @@ def status(model_id):
     model = Model.query.get_or_404(model_id)
     if model.user_id != current_user.id:
         return jsonify({"error": "Unauthorized"}), 403
-    if model.model_url:
+    
+    # Check GCS first
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(os.environ['BUCKET_NAME'])
+    model_filename = f'models/{current_user.id}/{model.id}.glb'
+    model_blob = bucket.blob(model_filename)
+    if model_blob.exists():
+        if not model.model_url:
+            model_blob.make_public()
+            model.model_url = model_blob.public_url
+            db.session.commit()
+            app.logger.info(f"Model found in GCS, updated DB: {model.model_url}")
         return jsonify({"status": "SUCCEEDED", "model_url": model.model_url})
+
+    # Check Meshy API if not in GCS
     try:
         task_response = requests.get(f"https://api.meshy.ai/openapi/v1/image-to-3d/{model.task_id}", headers=HEADERS, timeout=10)
         task_response.raise_for_status()
@@ -229,13 +213,8 @@ def status(model_id):
                 glb_response = requests.get(glb_url, timeout=10)
                 glb_response.raise_for_status()
                 model_content = glb_response.content
-                storage_client = storage.Client()
-                bucket = storage_client.bucket(os.environ['BUCKET_NAME'])
-                model_filename = f'models/{current_user.id}/{model.id}.glb'
-                model_blob = bucket.blob(model_filename)
-                # Upload and make public
                 model_blob.upload_from_string(model_content, content_type='model/gltf-binary')
-                model_blob.make_public()  # Set the object to be publicly readable
+                model_blob.make_public()
                 model.model_url = model_blob.public_url
                 db.session.commit()
                 app.logger.info(f"Model uploaded to {model.model_url}")
@@ -246,10 +225,14 @@ def status(model_id):
         elif status == "IN_PROGRESS":
             return jsonify({"status": "IN_PROGRESS", "progress": progress})
         else:
+            app.logger.error(f"Task failed or canceled: {status}")
             return jsonify({"status": status})
     except requests.RequestException as e:
-        app.logger.error(f"Status check error: {str(e)}")
+        app.logger.error(f"Status check error: {str(e)}, Task ID: {model.task_id}")
         return jsonify({"status": "ERROR", "error": str(e)}), 500
+    except Exception as e:
+        app.logger.error(f"Unexpected error in status: {str(e)}")
+        return jsonify({"status": "ERROR", "error": "Unexpected error"}), 500
 
 @app.route('/models')
 @login_required
@@ -257,16 +240,61 @@ def models():
     user_models = Model.query.filter_by(user_id=current_user.id).all()
     app.logger.info(f"Found {len(user_models)} models for user {current_user.id}")
     return render_template('models.html', models=user_models)
-"""
-@app.route('/admin')
+
+@app.route('/admin_panel')
 @login_required
-def admin():
+def admin_panel():
     if not current_user.is_admin:
         flash('Access denied. Admins only.')
         return redirect(url_for('index'))
     users = User.query.all()
-    return render_template('admin.html', users=users)
-"""
+    models = Model.query.all()
+    model_details = [
+        {
+            'id': model.id,
+            'user_id': model.user_id,
+            'username': User.query.get(model.user_id).username if User.query.get(model.user_id) else 'Deleted User',
+            'image_url': model.image_url,
+            'model_url': model.model_url,
+            'task_id': model.task_id
+        }
+        for model in models
+    ]
+    return render_template('admin_panel.html', users=users, models=model_details)
+
+# API for Unity
+@app.route('/api/login', methods=['POST'])
+def api_login():
+    data = request.get_json()
+    username = data.get('username')
+    password = data.get('password')
+    user = User.query.filter_by(username=username).first()
+    if user and user.check_password(password):
+        login_user(user)
+        return jsonify({'success': True, 'user_id': user.id, 'is_admin': user.is_admin})
+    return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
+
+@app.route('/api/signup', methods=['POST'])
+def api_signup():
+    data = request.get_json()
+    username = data.get('username')
+    password = data.get('password')
+    if User.query.filter_by(username=username).first():
+        return jsonify({'success': False, 'message': 'Username already exists'}), 400
+    user = User(username=username)
+    user.set_password(password)
+    db.session.add(user)
+    db.session.commit()
+    login_user(user)
+    return jsonify({'success': True, 'user_id': user.id, 'is_admin': user.is_admin})
+
+@app.route('/api/models', methods=['GET'])
+@login_required
+def api_get_models():
+    models = Model.query.filter_by(user_id=current_user.id).all()
+    model_list = [{'id': m.id, 'image_url': m.image_url, 'model_url': m.model_url} for m in models]
+    return jsonify({'success': True, 'models': model_list})
+
 # Initialize database
 with app.app_context():
     db.create_all()
@@ -275,13 +303,11 @@ with app.app_context():
         admin = User(username='admin', is_admin=True)
         admin.set_password('admin123')
         db.session.add(admin)
-        db.session.commit()
-        app.logger.info("Admin user 'admin' created with password 'admin123'")
     else:
-        if not admin.is_admin:
-            admin.is_admin = True
-            db.session.commit()
-            app.logger.info("Updated existing 'admin' user to is_admin=True")
+        admin.is_admin = True
+        admin.set_password('admin123')
+    db.session.commit()
+    app.logger.info("Admin user 'admin' ensured with password 'admin123'")
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8080) #cs
+    app.run(host='0.0.0.0', port=8080)
