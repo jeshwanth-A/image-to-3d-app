@@ -236,7 +236,7 @@ with app.app_context():
         db.session.commit()
         app.logger.info("Admin user 'admin' created with password 'admin123'")
     else:
-        # Ensure existing admin has is_admin set to True
+        # Ensure existing admin has is_admin set to True..as
         if not admin.is_admin:
             admin.is_admin = True
             db.session.commit()
