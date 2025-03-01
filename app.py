@@ -252,4 +252,4 @@ with app.app_context():
             app.logger.info("Updated existing 'admin' user to is_admin=True")
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8080)
+    app.run(host='0.0.0.0', port=8080) #cs
