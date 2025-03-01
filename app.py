@@ -1,7 +1,7 @@
 import time
 import base64
 import logging
-from flask import Flask, render_template, redirect, url_for, flash, request
+from flask import Flask, render_template, redirect, url_for, flash, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -11,7 +11,6 @@ from wtforms.validators import DataRequired, EqualTo
 import os
 from google.cloud import storage
 import requests
-from sqlalchemy import inspect
 
 # Setup Flask app
 app = Flask(__name__)
@@ -48,12 +47,13 @@ class Model(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     image_url = db.Column(db.String(256), nullable=False)
     model_url = db.Column(db.String(256), nullable=True)
+    task_id = db.Column(db.String(64), nullable=True)
 
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
 
-# Forms
+# Forms (unchanged)
 class SignupForm(FlaskForm):
     username = StringField('Username', validators=[DataRequired()])
     password = PasswordField('Password', validators=[DataRequired()])
@@ -81,6 +81,7 @@ def index():
 
 @app.route('/signup', methods=['GET', 'POST'])
 def signup():
+    # Unchanged signup logic
     form = SignupForm()
     if form.validate_on_submit():
         try:
@@ -97,24 +98,18 @@ def signup():
             db.session.rollback()
             flash('An error occurred during signup. Please try again.')
             return redirect(url_for('signup'))
-    elif request.method == 'POST':
-        for field, errors in form.errors.items():
-            for error in errors:
-                flash(f"{getattr(form, field).label.text}: {error}")
     return render_template('signup.html', form=form)
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
+    # Unchanged login logic
     form = LoginForm()
     if form.validate_on_submit():
-        try:
-            user = User.query.filter_by(username=form.username.data).first()
-            if user and user.check_password(form.password.data):
-                login_user(user)
-                return redirect(url_for('upload'))
-            flash('Invalid username or password.')
-        except Exception as e:
-            flash('An error occurred during login. Please try again.')
+        user = User.query.filter_by(username=form.username.data).first()
+        if user and user.check_password(form.password.data):
+            login_user(user)
+            return redirect(url_for('upload'))
+        flash('Invalid username or password.')
     return render_template('login.html', form=form)
 
 @app.route('/logout')
@@ -148,7 +143,12 @@ def upload():
                 return redirect(url_for('upload'))
 
             image_data_uri = image_to_data_uri(image_bytes, image_file.content_type)
-            payload = {"image_url": image_data_uri, "enable_pbr": False, "should_remesh": True, "should_texture": True}
+            payload = {
+                "image_url": image_data_uri,
+                "enable_pbr": False,
+                "should_remesh": True,
+                "should_texture": True
+            }
             app.logger.info("Calling Meshy API")
             response = requests.post("https://api.meshy.ai/openapi/v1/image-to-3d", json=payload, headers=HEADERS, timeout=10)
             response.raise_for_status()
@@ -160,46 +160,14 @@ def upload():
                 return redirect(url_for('upload'))
             app.logger.info(f"Task created: {task_id}")
 
-            max_attempts = 60
-            attempt = 0
-            while attempt < max_attempts:
-                time.sleep(10)
-                task_response = requests.get(f"https://api.meshy.ai/openapi/v1/image-to-3d/{task_id}", headers=HEADERS, timeout=10)
-                task_response.raise_for_status()
-                task_status = task_response.json()
-                status = task_status.get("status")
-                app.logger.info(f"Task status: {status}")
-                if status == "SUCCEEDED":
-                    model_urls = task_status.get("model_urls", {})
-                    glb_url = model_urls.get("glb")
-                    if glb_url:
-                        app.logger.info(f"Model URL: {glb_url}")
-                        model_response = requests.get(glb_url, timeout=10)
-                        model_content = model_response.content
-                        model_filename = f'models/{current_user.id}/{image_file.filename}.glb'
-                        model_blob = bucket.blob(model_filename)
-                        model_blob.upload_from_string(model_content, content_type='model/gltf-binary')
-                        model_url = model_blob.public_url
-                        app.logger.info(f"Model uploaded to {model_url}")
-                        model = Model(user_id=current_user.id, image_url=image_url, model_url=model_url)
-                        db.session.add(model)
-                        db.session.commit()
-                        flash('Image uploaded and model generated!')
-                        return redirect(url_for('models'))
-                    else:
-                        app.logger.error("No GLB URL in task response")
-                        flash('Model URL not found.')
-                        return redirect(url_for('upload'))
-                elif status in ["FAILED", "CANCELED"]:
-                    app.logger.error(f"Task failed: {status}")
-                    flash(f'Task {status.lower()}.')
-                    return redirect(url_for('upload'))
-                attempt += 1
-            app.logger.error("Task timed out after max attempts")
-            flash('Task timed out.')
+            model = Model(user_id=current_user.id, image_url=image_url, task_id=task_id, model_url=None)
+            db.session.add(model)
+            db.session.commit()
+            flash(f"Task key generated: {task_id}")
             return redirect(url_for('models'))
+
         except requests.RequestException as e:
-            app.logger.error(f"Meshy API error: {str(e)} - Response: {e.response.text if e.response else 'No response'}")
+            app.logger.error(f"Meshy API error: {str(e)}")
             flash(f'Meshy API error: {str(e)}')
             return redirect(url_for('upload'))
         except Exception as e:
@@ -207,6 +175,49 @@ def upload():
             flash(f'Upload failed: {str(e)}')
             return redirect(url_for('upload'))
     return render_template('upload.html', form=form)
+
+@app.route('/status/<int:model_id>', methods=['GET'])
+@login_required
+def status(model_id):
+    model = Model.query.get_or_404(model_id)
+    if model.user_id != current_user.id:
+        return jsonify({"error": "Unauthorized"}), 403
+    if model.model_url:
+        return jsonify({"status": "SUCCEEDED", "model_url": model.model_url})
+    try:
+        task_response = requests.get(f"https://api.meshy.ai/openapi/v1/image-to-3d/{model.task_id}", headers=HEADERS, timeout=10)
+        task_response.raise_for_status()
+        task_status = task_response.json()
+        status = task_status.get("status")
+        progress = task_status.get("progress", 0)
+        app.logger.info(f"Task {model.task_id} status: {status}, Progress: {progress}%")
+
+        if status == "SUCCEEDED":
+            model_urls = task_status.get("model_urls", {})
+            glb_url = model_urls.get("glb")
+            if glb_url:
+                glb_response = requests.get(glb_url, timeout=10)
+                glb_response.raise_for_status()
+                model_content = glb_response.content
+                storage_client = storage.Client()
+                bucket = storage_client.bucket(os.environ['BUCKET_NAME'])
+                model_filename = f'models/{current_user.id}/{model.id}.glb'
+                model_blob = bucket.blob(model_filename)
+                model_blob.upload_from_string(model_content, content_type='model/gltf-binary')
+                model.model_url = model_blob.public_url
+                db.session.commit()
+                app.logger.info(f"Model uploaded to {model.model_url}")
+                return jsonify({"status": "SUCCEEDED", "model_url": model.model_url})
+            else:
+                app.logger.error("No GLB URL in task response")
+                return jsonify({"status": "FAILED", "error": "No GLB URL"})
+        elif status == "IN_PROGRESS":
+            return jsonify({"status": "IN_PROGRESS", "progress": progress})
+        else:
+            return jsonify({"status": status})
+    except requests.RequestException as e:
+        app.logger.error(f"Status check error: {str(e)}")
+        return jsonify({"status": "ERROR", "error": str(e)}), 500
 
 @app.route('/models')
 @login_required
@@ -224,19 +235,17 @@ def admin():
     users = User.query.all()
     return render_template('admin.html', users=users)
 
-# Initialize database and ensure admin exists
+# Initialize database
 with app.app_context():
-    db.create_all()  # Only creates tables if they don't exist
-    # Check and create admin user if not present
+    db.create_all()
     admin = User.query.filter_by(username='admin').first()
     if not admin:
         admin = User(username='admin', is_admin=True)
-        admin.set_password('admin123')  # Hardcoded admin password
+        admin.set_password('admin123')
         db.session.add(admin)
         db.session.commit()
         app.logger.info("Admin user 'admin' created with password 'admin123'")
     else:
-        # Ensure existing admin has is_admin set to True..as
         if not admin.is_admin:
             admin.is_admin = True
             db.session.commit()

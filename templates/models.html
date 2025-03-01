@@ -1,46 +1,58 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Your 3D Models</title>
+    <title>My Models</title>
 </head>
 <body>
-    <h1>Your 3D Models</h1>
+    <h1>My Models</h1>
     {% with messages = get_flashed_messages() %}
         {% if messages %}
             {% for message in messages %}
-                <p style="color: green;">{{ message }}</p>
+                <p>{{ message }}</p>
             {% endfor %}
         {% endif %}
     {% endwith %}
-    {% if models %}
-        <table border="1">
-            <thead>
-                <tr>
-                    <th>Image</th>
-                    <th>3D Model</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for model in models %}
-                    <tr>
-                        <td><a href="{{ model.image_url }}" target="_blank">View Image</a></td>
-                        <td>
-                            {% if model.model_url %}
-                                <a href="{{ model.model_url }}" target="_blank">View Model</a>
-                            {% else %}
-                                Processing...
-                            {% endif %}
-                        </td>
-                    </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    {% else %}
-        <p>No models yet. <a href="{{ url_for('upload') }}">Upload an image</a> to get started!</p>
-    {% endif %}
-    <p>
-        <a href="{{ url_for('upload') }}">Upload Another Image</a> |
-        <a href="{{ url_for('logout') }}">Logout</a>
-    </p>
+    {% for model in models %}
+        <div id="model-{{ model.id }}">
+            {% if model.model_url %}
+                <p>Model ready: <a href="{{ model.model_url }}">Download</a></p>
+            {% else %}
+                <p>Received file: {{ model.image_url.split('/')[-1] }}, Type: image/jpeg, User: {{ current_user.username }}</p>
+                <p id="task-id-{{ model.id }}">Task ID: {{ model.task_id }}</p>
+                <p id="status-{{ model.id }}">Status: Processing...</p>
+                <progress id="progress-{{ model.id }}" value="0" max="100"></progress>
+            {% endif %}
+        </div>
+        {% if not model.model_url %}
+        <script>
+            function updateStatus(modelId) {
+                fetch('/status/' + modelId)
+                    .then(response => response.json())
+                    .then(data => {
+                        var statusElement = document.getElementById('status-' + modelId);
+                        var progressElement = document.getElementById('progress-' + modelId);
+                        if (data.status === 'SUCCEEDED') {
+                            document.getElementById('model-' + modelId).innerHTML = '<p>Model ready: <a href="' + data.model_url + '">Download</a></p>';
+                        } else if (data.status === 'IN_PROGRESS') {
+                            statusElement.textContent = 'Task Status: IN_PROGRESS, Progress: ' + data.progress + '%';
+                            progressElement.value = data.progress;
+                        } else {
+                            statusElement.textContent = 'Task Status: ' + data.status;
+                            progressElement.style.display = 'none';
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error fetching status:', error);
+                        document.getElementById('status-' + modelId).textContent = 'Error checking status';
+                    });
+            }
+            // Start polling immediately and then every 10 seconds
+            updateStatus({{ model.id }});
+            setInterval(() => updateStatus({{ model.id }}), 10000);
+        </script>
+        {% endif %}
+    {% endfor %}
+    <p><a href="{{ url_for('upload') }}">Upload another image</a></p>
+    <p><a href="{{ url_for('logout') }}">Logout</a></p>
 </body>
 </html>
