@@ -37,16 +37,32 @@
                             statusElement.textContent = 'Task Status: IN_PROGRESS, Progress: ' + data.progress + '%';
                             progressElement.value = data.progress;
                         } else if (data.status === 'ERROR') {
-                            statusElement.textContent = 'Error: ' + data.error + '. Checking GCS...';
-                            // Retry once to check GCS
-                            fetch('/status/' + modelId).then(r => r.json()).then(d => {
-                                if (d.status === 'SUCCEEDED') {
-                                    document.getElementById('model-' + modelId).innerHTML = '<p>Model ready: <a href="' + d.model_url + '">Download</a></p>';
-                                } else {
-                                    statusElement.textContent = 'Error persists: ' + d.error;
-                                    progressElement.style.display = 'none';
-                                }
-                            });
+                            statusElement.textContent = 'Error: ' + data.error + '. Retrying...';
+                            // Retry up to 3 times with a delay
+                            let retries = 0;
+                            const maxRetries = 3;
+                            const retryInterval = setInterval(() => {
+                                retries++;
+                                fetch('/status/' + modelId)
+                                    .then(r => r.json())
+                                    .then(d => {
+                                        if (d.status === 'SUCCEEDED') {
+                                            clearInterval(retryInterval);
+                                            document.getElementById('model-' + modelId).innerHTML = '<p>Model ready: <a href="' + d.model_url + '">Download</a></p>';
+                                        } else if (retries >= maxRetries) {
+                                            clearInterval(retryInterval);
+                                            statusElement.textContent = 'Failed to load model: ' + d.error;
+                                            progressElement.style.display = 'none';
+                                        }
+                                    })
+                                    .catch(err => {
+                                        if (retries >= maxRetries) {
+                                            clearInterval(retryInterval);
+                                            statusElement.textContent = 'Network error after retries';
+                                            progressElement.style.display = 'none';
+                                        }
+                                    });
+                            }, 5000); // Retry every 5 seconds
                         } else {
                             statusElement.textContent = 'Task Status: ' + data.status;
                             progressElement.style.display = 'none';
@@ -54,7 +70,7 @@
                     })
                     .catch(error => {
                         console.error('Fetch error:', error);
-                        document.getElementById('status-' + modelId).textContent = 'Network error checking status';
+                        document.getElementById('status-' + modelId).textContent = 'Network error checking status. Retrying...';
                     });
             }
             updateStatus({{ model.id }});

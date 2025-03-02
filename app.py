@@ -177,6 +177,8 @@ def upload():
             return redirect(url_for('upload'))
     return render_template('upload.html', form=form)
 
+# ... (Previous imports and setup remain unchanged)
+
 @app.route('/status/<int:model_id>', methods=['GET'])
 @login_required
 def status(model_id):
@@ -197,7 +199,11 @@ def status(model_id):
             app.logger.info(f"Model found in GCS, updated DB: {model.model_url}")
         return jsonify({"status": "SUCCEEDED", "model_url": model.model_url})
 
-    # Check Meshy API if not in GCS
+    # If model is not in GCS, check Meshy API
+    if not model.task_id:
+        app.logger.error(f"No task_id for model {model.id}")
+        return jsonify({"status": "ERROR", "error": "No task ID available"}), 500
+
     try:
         task_response = requests.get(f"https://api.meshy.ai/openapi/v1/image-to-3d/{model.task_id}", headers=HEADERS, timeout=10)
         task_response.raise_for_status()
@@ -229,10 +235,19 @@ def status(model_id):
             return jsonify({"status": status})
     except requests.RequestException as e:
         app.logger.error(f"Status check error: {str(e)}, Task ID: {model.task_id}")
+        # Check GCS again as a fallback
+        if model_blob.exists():
+            model_blob.make_public()
+            model.model_url = model_blob.public_url
+            db.session.commit()
+            app.logger.info(f"Model found in GCS after Meshy error, updated DB: {model.model_url}")
+            return jsonify({"status": "SUCCEEDED", "model_url": model.model_url})
         return jsonify({"status": "ERROR", "error": str(e)}), 500
     except Exception as e:
         app.logger.error(f"Unexpected error in status: {str(e)}")
         return jsonify({"status": "ERROR", "error": "Unexpected error"}), 500
+
+# ... (Rest of the app.py remains unchanged)
 
 @app.route('/models')
 @login_required
