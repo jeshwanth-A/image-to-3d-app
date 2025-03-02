@@ -186,26 +186,43 @@ def status(model_id):
     if model.user_id != current_user.id:
         return jsonify({"error": "Unauthorized"}), 403
     
-    # Check GCS first
-    storage_client = storage.Client()
-    bucket = storage_client.bucket(os.environ['BUCKET_NAME'])
-    model_filename = f'models/{current_user.id}/{model.id}.glb'
-    model_blob = bucket.blob(model_filename)
-    if model_blob.exists():
-        if not model.model_url:
-            model_blob.make_public()
-            model.model_url = model_blob.public_url
-            db.session.commit()
-            app.logger.info(f"Model found in GCS, updated DB: {model.model_url}")
+    # Step 1: Check if model_url is already set
+    if model.model_url:
+        app.logger.info(f"Model {model.id} already has model_url: {model.model_url}")
         return jsonify({"status": "SUCCEEDED", "model_url": model.model_url})
 
-    # If model is not in GCS, check Meshy API
+    # Step 2: Check GCS for the model file
+    try:
+        storage_client = storage.Client()
+        bucket = storage_client.bucket(os.environ['BUCKET_NAME'])
+        model_filename = f'models/{current_user.id}/{model.id}.glb'
+        model_blob = bucket.blob(model_filename)
+        if model_blob.exists():
+            app.logger.info(f"Model {model.id} found in GCS at {model_filename}")
+            try:
+                # Skip make_public() - rely on bucket IAM policy for public access
+                model.model_url = f"https://storage.googleapis.com/{os.environ['BUCKET_NAME']}/{model_filename}"
+                db.session.commit()
+                app.logger.info(f"Updated model {model.id} with model_url: {model.model_url}")
+                return jsonify({"status": "SUCCEEDED", "model_url": model.model_url})
+            except Exception as e:
+                app.logger.error(f"Failed to update model_url for model {model.id}: {str(e)}")
+                db.session.rollback()
+                return jsonify({"status": "ERROR", "error": "Failed to update model URL"}), 500
+        else:
+            app.logger.info(f"Model {model.id} not found in GCS at {model_filename}")
+    except Exception as e:
+        app.logger.error(f"Error checking GCS for model {model.id}: {str(e)}")
+        return jsonify({"status": "ERROR", "error": "Failed to check GCS: " + str(e)}), 500
+
+    # Step 3: If not in GCS, check Meshy API
     if not model.task_id:
         app.logger.error(f"No task_id for model {model.id}")
         return jsonify({"status": "ERROR", "error": "No task ID available"}), 500
 
     try:
-        task_response = requests.get(f"https://api.meshy.ai/openapi/v1/image-to-3d/{model.task_id}", headers=HEADERS, timeout=10)
+        app.logger.info(f"Checking Meshy API for task_id: {model.task_id}")
+        task_response = requests.get(f"https://api.meshy.ai/openapi/v1/image-to-3d/{model.task_id}", headers=HEADERS, timeout=15)
         task_response.raise_for_status()
         task_status = task_response.json()
         status = task_status.get("status")
@@ -216,14 +233,14 @@ def status(model_id):
             model_urls = task_status.get("model_urls", {})
             glb_url = model_urls.get("glb")
             if glb_url:
-                glb_response = requests.get(glb_url, timeout=10)
+                glb_response = requests.get(glb_url, timeout=15)
                 glb_response.raise_for_status()
                 model_content = glb_response.content
                 model_blob.upload_from_string(model_content, content_type='model/gltf-binary')
-                model_blob.make_public()
-                model.model_url = model_blob.public_url
+                # Skip make_public() - rely on bucket IAM policy
+                model.model_url = f"https://storage.googleapis.com/{os.environ['BUCKET_NAME']}/{model_filename}"
                 db.session.commit()
-                app.logger.info(f"Model uploaded to {model.model_url}")
+                app.logger.info(f"Model {model.id} uploaded to {model.model_url}")
                 return jsonify({"status": "SUCCEEDED", "model_url": model.model_url})
             else:
                 app.logger.error("No GLB URL in task response")
@@ -235,17 +252,23 @@ def status(model_id):
             return jsonify({"status": status})
     except requests.RequestException as e:
         app.logger.error(f"Status check error: {str(e)}, Task ID: {model.task_id}")
-        # Check GCS again as a fallback
+        # Final check: see if the model appeared in GCS
         if model_blob.exists():
-            model_blob.make_public()
-            model.model_url = model_blob.public_url
-            db.session.commit()
-            app.logger.info(f"Model found in GCS after Meshy error, updated DB: {model.model_url}")
-            return jsonify({"status": "SUCCEEDED", "model_url": model.model_url})
-        return jsonify({"status": "ERROR", "error": str(e)}), 500
+            app.logger.info(f"Model {model.id} found in GCS after Meshy error at {model_filename}")
+            try:
+                # Skip make_public() - rely on bucket IAM policy
+                model.model_url = f"https://storage.googleapis.com/{os.environ['BUCKET_NAME']}/{model_filename}"
+                db.session.commit()
+                app.logger.info(f"Updated model {model.id} with model_url: {model.model_url}")
+                return jsonify({"status": "SUCCEEDED", "model_url": model.model_url})
+            except Exception as e:
+                app.logger.error(f"Failed to update model_url for model {model.id}: {str(e)}")
+                db.session.rollback()
+                return jsonify({"status": "ERROR", "error": "Failed to update model URL after Meshy error"}), 500
+        return jsonify({"status": "ERROR", "error": "Meshy API error: " + str(e)}), 500
     except Exception as e:
         app.logger.error(f"Unexpected error in status: {str(e)}")
-        return jsonify({"status": "ERROR", "error": "Unexpected error"}), 500
+        return jsonify({"status": "ERROR", "error": "Unexpected error: " + str(e)}), 500
 
 # ... (Rest of the app.py remains unchanged)
 
