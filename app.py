@@ -210,7 +210,7 @@ def status(model_id):
     # Step 1: Check if model_url is already set
     if model.model_url:
         app.logger.info(f"Model {model.id} already has model_url: {model.model_url}")
-        return jsonify({"status": "SUCCEEDED", "model_url": model.model_url})
+        return jsonify({"status": "SUCCEEDED", "model_url": model.model_url})  # Fixed here
 
     # Step 2: Check GCS for the model file
     try:
@@ -225,7 +225,7 @@ def status(model_id):
                 model.model_url = f"https://storage.googleapis.com/{os.environ['BUCKET_NAME']}/{model_filename}"
                 db.session.commit()
                 app.logger.info(f"Updated model {model.id} with model_url: {model.model_url}")
-                return jsonify({"status": "SUCCEEDED", "model_url": model.model_url})
+                return jsonify({"status": "SUCCEEDED", "model_url": model.model_url})  # Fixed here
             except Exception as e:
                 app.logger.error(f"Failed to update model_url for model {model.id}: {str(e)}")
                 db.session.rollback()
@@ -250,38 +250,35 @@ def status(model_id):
         progress = task_status["data"].get("progress", 0)
         app.logger.info(f"Task {model.task_id} status: {status}, Progress: {progress}%")
 
-        if status == "success":  # Tripo uses "success" instead of "SUCCEEDED"
+        if status == "success":
             model_urls = task_status["data"]["result"]
-            glb_url = model_urls["pbr_model"]["url"]  # Tripo’s GLB URL, even without PBR
+            glb_url = model_urls["pbr_model"]["url"]
             if glb_url:
                 glb_response = requests.get(glb_url, timeout=15)
                 glb_response.raise_for_status()
                 model_content = glb_response.content
                 model_blob.upload_from_string(model_content, content_type='model/gltf-binary')
-                # Skip make_public() - rely on bucket IAM policy
                 model.model_url = f"https://storage.googleapis.com/{os.environ['BUCKET_NAME']}/{model_filename}"
                 db.session.commit()
                 app.logger.info(f"Model {model.id} uploaded to {model.model_url}")
-                return jsonify({"status": "SUCCEEDED", "model_url": model.model_url})
+                return jsonify({"status": "SUCCEEDED", "model_url": model.model_url})  # Fixed here
             else:
                 app.logger.error("No GLB URL in task response")
                 return jsonify({"status": "FAILED", "error": "No GLB URL"})
         elif status == "running":
             return jsonify({"status": "IN_PROGRESS", "progress": progress})
-        else:  # "failed", "canceled", or other states
+        else:
             app.logger.error(f"Task failed or canceled: {status}")
             return jsonify({"status": status})
     except requests.RequestException as e:
         app.logger.error(f"Status check error: {str(e)}, Task ID: {model.task_id}")
-        # Final check: see if the model appeared in GCS
         if model_blob.exists():
             app.logger.info(f"Model {model.id} found in GCS after Tripo error at {model_filename}")
             try:
-                # Skip make_public() - rely on bucket IAM policy
                 model.model_url = f"https://storage.googleapis.com/{os.environ['BUCKET_NAME']}/{model_filename}"
                 db.session.commit()
                 app.logger.info(f"Updated model {model.id} with model_url: {model.model_url}")
-                return jsonify({"status": "SUCCEEDED", "model_url": model.model_url}")
+                return jsonify({"status": "SUCCEEDED", "model_url": model.model_url})  # Fixed here
             except Exception as e:
                 app.logger.error(f"Failed to update model_url for model {model.id}: {str(e)}")
                 db.session.rollback()
@@ -290,7 +287,6 @@ def status(model_id):
     except Exception as e:
         app.logger.error(f"Unexpected error in status: {str(e)}")
         return jsonify({"status": "ERROR", "error": "Unexpected error: " + str(e)}), 500
-
 # ... (Rest of the app.py remains unchanged)
 
 @app.route('/models')
