@@ -210,7 +210,7 @@ def status(model_id):
     # Step 1: Check if model_url is already set
     if model.model_url:
         app.logger.info(f"Model {model.id} already has model_url: {model.model_url}")
-        return jsonify({"status": "SUCCEEDED", "model_url": model.model_url})  # Fixed here
+        return jsonify({"status": "SUCCEEDED", "model_url": model.model_url})
 
     # Step 2: Check GCS for the model file
     try:
@@ -221,11 +221,10 @@ def status(model_id):
         if model_blob.exists():
             app.logger.info(f"Model {model.id} found in GCS at {model_filename}")
             try:
-                # Skip make_public() - rely on bucket IAM policy for public access
                 model.model_url = f"https://storage.googleapis.com/{os.environ['BUCKET_NAME']}/{model_filename}"
                 db.session.commit()
                 app.logger.info(f"Updated model {model.id} with model_url: {model.model_url}")
-                return jsonify({"status": "SUCCEEDED", "model_url": model.model_url})  # Fixed here
+                return jsonify({"status": "SUCCEEDED", "model_url": model.model_url})
             except Exception as e:
                 app.logger.error(f"Failed to update model_url for model {model.id}: {str(e)}")
                 db.session.rollback()
@@ -248,12 +247,12 @@ def status(model_id):
         task_status = task_response.json()
         status = task_status["data"]["status"]
         progress = task_status["data"].get("progress", 0)
-        app.logger.info(f"Task {model.task_id} status: {status}, Progress: {progress}%")
+        app.logger.info(f"Task {model.task_id} status: {status}, Progress: {progress}%, Response: {task_status}")
 
         if status == "success":
-            model_urls = task_status["data"]["result"]
-            glb_url = model_urls["pbr_model"]["url"]
-            if glb_url:
+            result = task_status["data"].get("result")
+            if result and "pbr_model" in result and "url" in result["pbr_model"]:
+                glb_url = result["pbr_model"]["url"]
                 glb_response = requests.get(glb_url, timeout=15)
                 glb_response.raise_for_status()
                 model_content = glb_response.content
@@ -261,10 +260,10 @@ def status(model_id):
                 model.model_url = f"https://storage.googleapis.com/{os.environ['BUCKET_NAME']}/{model_filename}"
                 db.session.commit()
                 app.logger.info(f"Model {model.id} uploaded to {model.model_url}")
-                return jsonify({"status": "SUCCEEDED", "model_url": model.model_url})  # Fixed here
+                return jsonify({"status": "SUCCEEDED", "model_url": model.model_url})
             else:
-                app.logger.error("No GLB URL in task response")
-                return jsonify({"status": "FAILED", "error": "No GLB URL"})
+                app.logger.error(f"Task succeeded but no valid 'pbr_model' URL in response: {task_status}")
+                return jsonify({"status": "FAILED", "error": "No GLB URL in response"})
         elif status == "running":
             return jsonify({"status": "IN_PROGRESS", "progress": progress})
         else:
@@ -278,14 +277,14 @@ def status(model_id):
                 model.model_url = f"https://storage.googleapis.com/{os.environ['BUCKET_NAME']}/{model_filename}"
                 db.session.commit()
                 app.logger.info(f"Updated model {model.id} with model_url: {model.model_url}")
-                return jsonify({"status": "SUCCEEDED", "model_url": model.model_url})  # Fixed here
+                return jsonify({"status": "SUCCEEDED", "model_url": model.model_url})
             except Exception as e:
                 app.logger.error(f"Failed to update model_url for model {model.id}: {str(e)}")
                 db.session.rollback()
                 return jsonify({"status": "ERROR", "error": "Failed to update model URL after Tripo error"}), 500
         return jsonify({"status": "ERROR", "error": "Tripo API error: " + str(e)}), 500
     except Exception as e:
-        app.logger.error(f"Unexpected error in status: {str(e)}")
+        app.logger.error(f"Unexpected error in status: {str(e)}, Task ID: {model.task_id}")
         return jsonify({"status": "ERROR", "error": "Unexpected error: " + str(e)}), 500
 # ... (Rest of the app.py remains unchanged)
 
