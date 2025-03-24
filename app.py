@@ -251,24 +251,31 @@ def status(model_id):
 
         if status == "success":
             result = task_status["data"].get("result")
-            if result and "pbr_model" in result and "url" in result["pbr_model"]:
-                glb_url = result["pbr_model"]["url"]
-                glb_response = requests.get(glb_url, timeout=15)
-                glb_response.raise_for_status()
-                model_content = glb_response.content
-                model_blob.upload_from_string(model_content, content_type='model/gltf-binary')
-                model.model_url = f"https://storage.googleapis.com/{os.environ['BUCKET_NAME']}/{model_filename}"
-                db.session.commit()
-                app.logger.info(f"Model {model.id} uploaded to {model.model_url}")
-                return jsonify({"status": "SUCCEEDED", "model_url": model.model_url})
+            if result:
+                # Try "model" first (non-PBR), then "pbr_model" (PBR)
+                glb_url = (result.get("model", {}).get("url") or 
+                          result.get("pbr_model", {}).get("url"))
+                if glb_url:
+                    glb_response = requests.get(glb_url, timeout=15)
+                    glb_response.raise_for_status()
+                    model_content = glb_response.content
+                    model_blob.upload_from_string(model_content, content_type='model/gltf-binary')
+                    model.model_url = f"https://storage.googleapis.com/{os.environ['BUCKET_NAME']}/{model_filename}"
+                    db.session.commit()
+                    app.logger.info(f"Model {model.id} uploaded to {model.model_url}")
+                    return jsonify({"status": "SUCCEEDED", "model_url": model.model_url})
+                else:
+                    app.logger.error(f"Task succeeded but no valid model URL in response: {task_status}")
+                    return jsonify({"status": "FAILED", "error": "No GLB URL in response"})
             else:
-                app.logger.error(f"Task succeeded but no valid 'pbr_model' URL in response: {task_status}")
-                return jsonify({"status": "FAILED", "error": "No GLB URL in response"})
+                app.logger.error(f"Task succeeded but no 'result' in response: {task_status}")
+                return jsonify({"status": "FAILED", "error": "No result in response"})
         elif status == "running":
             return jsonify({"status": "IN_PROGRESS", "progress": progress})
         else:
-            app.logger.error(f"Task failed or canceled: {status}")
-            return jsonify({"status": status})
+            failure_reason = task_status["data"].get("message", "No failure reason provided")
+            app.logger.error(f"Task failed or canceled: {status}, Reason: {failure_reason}")
+            return jsonify({"status": status, "error": failure_reason})
     except requests.RequestException as e:
         app.logger.error(f"Status check error: {str(e)}, Task ID: {model.task_id}")
         if model_blob.exists():
