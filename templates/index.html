@@ -7,10 +7,12 @@
     <h1>Welcome to Portal</h1>
     <p class="mb-3">Turn 2D images into 3D models for your games and projects</p>
     
+    {% if not current_user.is_authenticated %}
     <div class="mb-3">
         <a href="{{ url_for('signup') }}" class="btn btn-primary">Sign Up</a>
         <a href="{{ url_for('login') }}" class="btn btn-light">Log In</a>
     </div>
+    {% endif %}
     
     <div class="mt-3">
         <h3>Download Portal Game</h3>
