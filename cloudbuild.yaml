@@ -23,7 +23,7 @@ steps:
       - '--add-cloudsql-instances'
       - 'project-2-450420:us-central1:arportal'
       - '--set-secrets'
-      - 'FLASK_SECRET_KEY=flask-secret-key:latest,DATABASE_URL=database-url:latest,MESHY_API_KEY=meshy-api-key:latest'
+      - 'FLASK_SECRET_KEY=flask-secret-key:latest,DATABASE_URL=database-url:latest,TRIPO_API_KEY=tripo-api-key:latest'
       - '--set-env-vars'
       - 'BUCKET_NAME=project-2-450420-images'
       - '--service-account'

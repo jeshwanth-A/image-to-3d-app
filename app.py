@@ -32,8 +32,8 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 logging.basicConfig(level=logging.INFO)
 app.logger.setLevel(logging.INFO)
 
-# Load Meshy API Key
-API_KEY = os.environ.get("MESHY_API_KEY")
+# Load Tripo API Key
+API_KEY = os.environ.get("TRIPO_API_KEY")
 HEADERS = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"} if API_KEY else {}
 
 # Models
@@ -155,9 +155,10 @@ def upload():
             app.logger.info(f"Image uploaded to {image_url}")
 
             if not API_KEY:
-                flash('Meshy API key not configured.')
+                flash('Tripo API key not configured.')
                 return redirect(url_for('upload'))
 
+            # Prepare payload for Tripo API (adjust as per Tripo docs if needed)
             image_data_uri = image_to_data_uri(image_bytes, image_file.content_type)
             payload = {
                 "image_url": image_data_uri,
@@ -165,18 +166,17 @@ def upload():
                 "should_remesh": True,
                 "should_texture": True
             }
-            app.logger.info("Calling Meshy API")
-            response = requests.post("https://api.meshy.ai/openapi/v1/image-to-3d", json=payload, headers=HEADERS, timeout=10)
+            app.logger.info("Calling Tripo API")
+            response = requests.post("https://api.tripo.ai/v1/upload", json=payload, headers=HEADERS, timeout=10)
             response.raise_for_status()
             task_data = response.json()
-            task_id = task_data.get("result")
+            task_id = task_data.get("task_id")
             if not task_id:
                 app.logger.error(f"No task ID received: {task_data}")
                 flash("Task ID not received from API.")
                 return redirect(url_for('upload'))
             app.logger.info(f"Task created: {task_id}")
 
-            # Default model name: filename without extension
             base_name = os.path.splitext(image_file.filename)[0]
             model_name = form.name.data.strip() if form.name.data and form.name.data.strip() else base_name
             model = Model(
@@ -191,8 +191,8 @@ def upload():
             flash(f"Task key generated: {task_id}")
             return redirect(url_for('models'))
         except requests.RequestException as e:
-            app.logger.error(f"Meshy API error: {str(e)}")
-            flash(f'Meshy API error: {str(e)}')
+            app.logger.error(f"Tripo API error: {str(e)}")
+            flash(f'Tripo API error: {str(e)}')
             return redirect(url_for('upload'))
         except Exception as e:
             app.logger.error(f"Upload error: {str(e)}")
@@ -206,7 +206,7 @@ def status(model_id):
     model = Model.query.get_or_404(model_id)
     if model.user_id != current_user.id:
         return jsonify({"error": "Unauthorized"}), 403
-    
+
     # Step 1: Check if model_url is already set
     if model.model_url:
         app.logger.info(f"Model {model.id} already has model_url: {model.model_url}")
@@ -221,7 +221,6 @@ def status(model_id):
         if model_blob.exists():
             app.logger.info(f"Model {model.id} found in GCS at {model_filename}")
             try:
-                # Skip make_public() - rely on bucket IAM policy for public access
                 model.model_url = f"https://storage.googleapis.com/{os.environ['BUCKET_NAME']}/{model_filename}"
                 db.session.commit()
                 app.logger.info(f"Updated model {model.id} with model_url: {model.model_url}")
@@ -236,14 +235,14 @@ def status(model_id):
         app.logger.error(f"Error checking GCS for model {model.id}: {str(e)}")
         return jsonify({"status": "ERROR", "error": "Failed to check GCS: " + str(e)}), 500
 
-    # Step 3: If not in GCS, check Meshy API
+    # Step 3: If not in GCS, check Tripo API
     if not model.task_id:
         app.logger.error(f"No task_id for model {model.id}")
         return jsonify({"status": "ERROR", "error": "No task ID available"}), 500
 
     try:
-        app.logger.info(f"Checking Meshy API for task_id: {model.task_id}")
-        task_response = requests.get(f"https://api.meshy.ai/openapi/v1/image-to-3d/{model.task_id}", headers=HEADERS, timeout=15)
+        app.logger.info(f"Checking Tripo API for task_id: {model.task_id}")
+        task_response = requests.get(f"https://api.tripo.ai/v1/task/{model.task_id}", headers=HEADERS, timeout=15)
         task_response.raise_for_status()
         task_status = task_response.json()
         status = task_status.get("status")
@@ -258,7 +257,6 @@ def status(model_id):
                 glb_response.raise_for_status()
                 model_content = glb_response.content
                 model_blob.upload_from_string(model_content, content_type='model/gltf-binary')
-                # Skip make_public() - rely on bucket IAM policy
                 model.model_url = f"https://storage.googleapis.com/{os.environ['BUCKET_NAME']}/{model_filename}"
                 db.session.commit()
                 app.logger.info(f"Model {model.id} uploaded to {model.model_url}")
@@ -273,11 +271,9 @@ def status(model_id):
             return jsonify({"status": status})
     except requests.RequestException as e:
         app.logger.error(f"Status check error: {str(e)}, Task ID: {model.task_id}")
-        # Final check: see if the model appeared in GCS
         if model_blob.exists():
-            app.logger.info(f"Model {model.id} found in GCS after Meshy error at {model_filename}")
+            app.logger.info(f"Model {model.id} found in GCS after Tripo error at {model_filename}")
             try:
-                # Skip make_public() - rely on bucket IAM policy
                 model.model_url = f"https://storage.googleapis.com/{os.environ['BUCKET_NAME']}/{model_filename}"
                 db.session.commit()
                 app.logger.info(f"Updated model {model.id} with model_url: {model.model_url}")
@@ -285,8 +281,8 @@ def status(model_id):
             except Exception as e:
                 app.logger.error(f"Failed to update model_url for model {model.id}: {str(e)}")
                 db.session.rollback()
-                return jsonify({"status": "ERROR", "error": "Failed to update model URL after Meshy error"}), 500
-        return jsonify({"status": "ERROR", "error": "Meshy API error: " + str(e)}), 500
+                return jsonify({"status": "ERROR", "error": "Failed to update model URL after Tripo error"}), 500
+        return jsonify({"status": "ERROR", "error": "Tripo API error: " + str(e)}), 500
     except Exception as e:
         app.logger.error(f"Unexpected error in status: {str(e)}")
         return jsonify({"status": "ERROR", "error": "Unexpected error: " + str(e)}), 500
