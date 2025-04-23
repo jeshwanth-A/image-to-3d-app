@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}My Models{% endblock %}dblock %}
+{% block title %}My Models{% endblock %}
 
 {% block styles %}
 <style>
@@ -245,7 +245,7 @@
                                 <a href="{{ model.model_url }}" target="_blank" id="download-link-{{ model.id }}" class="btn btn-primary btn-sm">
                                     <i class="fas fa-download"></i> Download
                                 </a>
-                                <button class="view-btn" onclick="showModal('model', '{{ model.model_url }}', '{{ model.name or model.image_url.split(\'/\')[-1].rsplit(\'.\', 1)[0] }}')">
+                                <button class="view-btn" onclick="showModal('model', '{{ model.model_url }}', '{{ model.name or model.image_url.split('/')[-1].rsplit('.', 1)[0] }}')">
                                     <i class="far fa-eye"></i> View
                                 </button>
                             </div>
@@ -568,3 +568,4 @@
 <!-- Remove redundant navigation -->
 </body>
 </html>
+{% endblock %}
