@@ -298,6 +298,36 @@ def delete_model(model_id):
     flash('Model deleted successfully.')
     return redirect(url_for('models'))
 
+@app.route('/admin_delete_model/<int:model_id>', methods=['POST'])
+@login_required
+def admin_delete_model(model_id):
+    if not current_user.is_admin:
+        abort(403)
+    model = Model.query.get_or_404(model_id)
+    # Remove model file from GCS if exists
+    try:
+        storage_client = storage.Client()
+        bucket = storage_client.bucket(os.environ['BUCKET_NAME'])
+        # Remove image
+        if model.image_url:
+            image_path = '/'.join(model.image_url.split('/')[-3:])
+            image_blob = bucket.blob(image_path)
+            if image_blob.exists():
+                image_blob.delete()
+        # Remove model file
+        if model.model_url:
+            model_path = '/'.join(model.model_url.split('/')[-3:])
+            model_blob = bucket.blob(model_path)
+            if model_blob.exists():
+                model_blob.delete()
+    except Exception as e:
+        app.logger.error(f"Error deleting files from GCS: {str(e)}")
+    # Remove from DB
+    db.session.delete(model)
+    db.session.commit()
+    flash('Model deleted successfully.')
+    return redirect(url_for('admin_panel'))
+
 @app.route('/models', methods=['GET'])
 @login_required
 def models():
