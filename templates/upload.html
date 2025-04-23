@@ -18,6 +18,10 @@
             {{ form.image.label }}<br>
             {{ form.image() }}
         </p>
+        <p>
+            {{ form.name.label }}<br>
+            {{ form.name(size=32) }}
+        </p>
         <p>{{ form.submit() }}</p>
     </form>
     <p><a href="{{ url_for('models') }}">View My Models</a></p>

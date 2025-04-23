@@ -68,6 +68,7 @@ class LoginForm(FlaskForm):
 
 class UploadForm(FlaskForm):
     image = FileField('Image', validators=[DataRequired()])
+    name = StringField('Model Name (optional)')
     submit = SubmitField('Upload')
 
 class RenameModelForm(FlaskForm):
@@ -169,12 +170,13 @@ def upload():
 
             # Default model name: filename without extension
             base_name = os.path.splitext(image_file.filename)[0]
+            model_name = form.name.data.strip() if form.name.data and form.name.data.strip() else base_name
             model = Model(
                 user_id=current_user.id,
                 image_url=image_url,
                 task_id=task_id,
                 model_url=None,
-                name=base_name
+                name=model_name
             )
             db.session.add(model)
             db.session.commit()
