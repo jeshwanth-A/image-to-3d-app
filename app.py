@@ -163,7 +163,12 @@ def upload():
             app.logger.info("Uploading image to Tripo API")
             tripo_upload_url = "https://api.tripo3d.ai/v2/openapi/upload"
             files = {'file': (image_file.filename, image_bytes, image_file.content_type)}
-            upload_response = requests.post(tripo_upload_url, headers={"Authorization": f"Bearer {API_KEY}"}, files=files)
+            upload_headers = {"Authorization": f"Bearer {API_KEY}"}
+            upload_response = requests.post(tripo_upload_url, headers=upload_headers, files=files)
+            if upload_response.status_code == 403:
+                app.logger.error("Tripo upload 403 Forbidden: Check your TRIPO_API_KEY and Tripo account permissions.")
+                flash("Tripo API error: Forbidden (check your API key and permissions).")
+                return redirect(url_for('upload'))
             upload_response.raise_for_status()
             upload_data = upload_response.json()
             if upload_data.get("code") != 0:
@@ -205,6 +210,10 @@ def upload():
             flash(f"Task key generated: {task_id}")
             return redirect(url_for('models'))
         except requests.RequestException as e:
+            if hasattr(e, 'response') and e.response is not None and e.response.status_code == 403:
+                app.logger.error("Tripo API 403 Forbidden: Check your TRIPO_API_KEY and Tripo account permissions.")
+                flash("Tripo API error: Forbidden (check your API key and permissions).")
+                return redirect(url_for('upload'))
             app.logger.error(f"Tripo API error: {str(e)}")
             flash(f'Tripo API error: {str(e)}')
             return redirect(url_for('upload'))
