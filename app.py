@@ -25,6 +25,11 @@ login_manager.login_view = 'login'
 logging.basicConfig(level=logging.INFO)
 app.logger.setLevel(logging.INFO)
 
+# Ensure BUCKET_NAME is set
+BUCKET_NAME = os.environ.get('BUCKET_NAME')
+if not BUCKET_NAME:
+    logging.error("Environment variable BUCKET_NAME is not set. Please set BUCKET_NAME for Google Cloud Storage.")
+
 # Load Meshy API Key
 API_KEY = os.environ.get("MESHY_API_KEY")
 HEADERS = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"} if API_KEY else {}
@@ -135,9 +140,13 @@ def upload():
             image_bytes = image_file.read()
             app.logger.info("Image read successfully")
 
+            if not BUCKET_NAME:
+                flash('Server misconfiguration: BUCKET_NAME is not set.')
+                return redirect(url_for('upload'))
+
             # Upload image to Google Cloud Storage
             storage_client = storage.Client()
-            bucket = storage_client.bucket(os.environ['BUCKET_NAME'])
+            bucket = storage_client.bucket(BUCKET_NAME)
             filename = f'images/{current_user.id}/{image_file.filename}'
             blob = bucket.blob(filename)
             blob.upload_from_string(image_bytes, content_type=image_file.content_type)
@@ -205,14 +214,16 @@ def upload():
             return redirect(url_for('upload'))
     return render_template('upload.html', form=form)
 
-# ... (Previous imports and setup remain unchanged)
-
 @app.route('/status/<int:model_id>', methods=['GET'])
 @login_required
 def status(model_id):
     model = Model.query.get_or_404(model_id)
     if model.user_id != current_user.id:
         return jsonify({"error": "Unauthorized"}), 403
+
+    if not BUCKET_NAME:
+        app.logger.error("BUCKET_NAME is not set in environment.")
+        return jsonify({"status": "ERROR", "error": "Server misconfiguration: BUCKET_NAME is not set."}), 500
 
     # Step 1: Check if model_url is already set
     if model.model_url:
@@ -222,13 +233,13 @@ def status(model_id):
     # Step 2: Check GCS for the model file
     try:
         storage_client = storage.Client()
-        bucket = storage_client.bucket(os.environ['BUCKET_NAME'])
+        bucket = storage_client.bucket(BUCKET_NAME)
         model_filename = f'models/{current_user.id}/{model.id}.glb'
         model_blob = bucket.blob(model_filename)
         if model_blob.exists():
             app.logger.info(f"Model {model.id} found in GCS at {model_filename}")
             try:
-                model.model_url = f"https://storage.googleapis.com/{os.environ['BUCKET_NAME']}/{model_filename}"
+                model.model_url = f"https://storage.googleapis.com/{BUCKET_NAME}/{model_filename}"
                 db.session.commit()
                 app.logger.info(f"Updated model {model.id} with model_url: {model.model_url}")
                 return jsonify({"status": "SUCCEEDED", "model_url": model.model_url})
@@ -267,7 +278,7 @@ def status(model_id):
                     glb_response.raise_for_status()
                     model_content = glb_response.content
                     model_blob.upload_from_string(model_content, content_type='model/gltf-binary')
-                    model.model_url = f"https://storage.googleapis.com/{os.environ['BUCKET_NAME']}/{model_filename}"
+                    model.model_url = f"https://storage.googleapis.com/{BUCKET_NAME}/{model_filename}"
                     db.session.commit()
                     app.logger.info(f"Model {model.id} uploaded to {model.model_url}")
                     return jsonify({"status": "SUCCEEDED", "model_url": model.model_url})
@@ -288,7 +299,7 @@ def status(model_id):
         if model_blob.exists():
             app.logger.info(f"Model {model.id} found in GCS after Tripo error at {model_filename}")
             try:
-                model.model_url = f"https://storage.googleapis.com/{os.environ['BUCKET_NAME']}/{model_filename}"
+                model.model_url = f"https://storage.googleapis.com/{BUCKET_NAME}/{model_filename}"
                 db.session.commit()
                 app.logger.info(f"Updated model {model.id} with model_url: {model.model_url}")
                 return jsonify({"status": "SUCCEEDED", "model_url": model.model_url})
@@ -300,7 +311,6 @@ def status(model_id):
     except Exception as e:
         app.logger.error(f"Unexpected error in status: {str(e)}, Task ID: {model.task_id}")
         return jsonify({"status": "ERROR", "error": "Unexpected error: " + str(e)}), 500
-# ... (Rest of the app.py remains unchanged)
 
 @app.route('/models')
 @login_required
