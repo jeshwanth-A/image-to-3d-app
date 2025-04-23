@@ -172,7 +172,6 @@
                             } else {
                                 statusElement.textContent = 'Status: ' + data.status;
                                 progressElement.style.display = 'none';
-                                // Stop polling for unknown or terminal statuses other than success/error handled above
                                 if (intervalId) clearInterval(intervalId); 
                             }
                         })
@@ -194,13 +193,9 @@
                         var progressElement = document.getElementById('progress-' + modelId);
                          if(statusElement) statusElement.textContent = 'Failed to get status after multiple retries.';
                          if(progressElement) progressElement.style.display = 'none';
-                    } else {
-                       // We already have an interval, the main updateStatus will handle retries implicitly 
-                       // if the status remains ERROR/FAILED or network fails
                     }
                 }
 
-                // Initial call and set interval
                 if (document.getElementById('model-status-' + modelId).innerHTML.includes('Processing')) {
                     updateStatus(); // Initial call
                     intervalId = setInterval(updateStatus, 10000); // Poll every 10 seconds
@@ -229,21 +224,28 @@
         if (type === 'image') {
             modalBody.innerHTML = '<img src="' + url + '" alt="Source Image">';
         } else if (type === 'model') {
-            modalBody.innerHTML = `
-                <model-viewer src="` + url + `" alt="3D Model" auto-rotate camera-controls background-color="#fff" ar ar-modes="webxr scene-viewer quick-look">
-                  <div style="color:#c00;">Your browser does not support 3D model viewing.</div>
-                </model-viewer>
-                <div style="margin-top:10px;">
-                    <a href="` + url + `" target="_blank">Download .glb</a>
-                </div>
-            `;
+            // Check if model-viewer is supported
+            if (typeof modelViewer === 'undefined') {
+                modalBody.innerHTML = '<p>3D model viewing is not supported in this browser. <a href="' + url + '">Download .glb</a></p>';
+            } else {
+                modalBody.innerHTML = `
+                    <model-viewer src="${url}" alt="3D Model" auto-rotate camera-controls background-color="#fff" ar ar-modes="webxr scene-viewer quick-look">
+                        <div style="color:#c00;">Your browser does not support 3D model viewing.</div>
+                    </model-viewer>
+                    <div style="margin-top:10px;">
+                        <a href="${url}" target="_blank">Download .glb</a>
+                    </div>
+                `;
+            }
         }
         modal.style.display = 'block';
     }
+
     function closeModal() {
         document.getElementById('viewModal').style.display = 'none';
         document.getElementById('modalBody').innerHTML = '';
     }
+
     // Close modal on outside click
     window.onclick = function(event) {
         var modal = document.getElementById('viewModal');
@@ -251,9 +253,14 @@
             closeModal();
         }
     }
+
+    // Debugging: Check if model-viewer is loaded
+    if (typeof modelViewer === 'undefined') {
+        console.error('model-viewer library not loaded');
+    }
     </script>
 
     <p><a href="{{ url_for('upload') }}">Upload another image</a></p>
     <p><a href="{{ url_for('logout') }}">Logout</a></p>
-</body>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'934c91fabf9f6755',t:'MTc0NTQwMzAxNy4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
 </html>
