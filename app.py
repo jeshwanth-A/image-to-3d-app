@@ -8,7 +8,7 @@ from flask_login import LoginManager, UserMixin, login_user, login_required, log
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_wtf import FlaskForm
 from wtforms import StringField, PasswordField, FileField, SubmitField
-from wtforms.validators import DataRequired, EqualTo
+from wtforms.validators import DataRequired, EqualTo, Optional, Email
 import os
 from google.cloud import storage
 import requests
@@ -40,13 +40,20 @@ HEADERS = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/js
 class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(64), unique=True, nullable=False)
-    password_hash = db.Column(db.String(256), nullable=False)
+    password_hash = db.Column(db.String(256), nullable=True)  # nullable for Google users
     is_admin = db.Column(db.Boolean, default=False)
+    email = db.Column(db.String(120), unique=True, nullable=True)
+    mobile = db.Column(db.String(32), unique=True, nullable=True)
+    google_id = db.Column(db.String(128), unique=True, nullable=True)
+    reset_token = db.Column(db.String(128), nullable=True)
+    reset_token_expiry = db.Column(db.DateTime, nullable=True)
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
 
     def check_password(self, password):
+        if not self.password_hash:
+            return False
         return check_password_hash(self.password_hash, password)
 
 class Model(db.Model):
@@ -65,13 +72,15 @@ def load_user(user_id):
 # Forms
 class SignupForm(FlaskForm):
     username = StringField('Username', validators=[DataRequired()])
-    password = PasswordField('Password', validators=[DataRequired()])
-    confirm_password = PasswordField('Confirm Password', validators=[DataRequired(), EqualTo('password')])
+    password = PasswordField('Password', validators=[Optional()])
+    confirm_password = PasswordField('Confirm Password', validators=[Optional(), EqualTo('password')])
+    email = StringField('Email (optional)', validators=[Optional(), Email()])
+    mobile = StringField('Mobile (optional)', validators=[Optional()])
     submit = SubmitField('Sign Up')
 
 class LoginForm(FlaskForm):
     username = StringField('Username', validators=[DataRequired()])
-    password = PasswordField('Password', validators=[DataRequired()])
+    password = PasswordField('Password', validators=[Optional()])
     submit = SubmitField('Log In')
 
 class UploadForm(FlaskForm):
@@ -163,12 +172,7 @@ def upload():
             app.logger.info("Uploading image to Tripo API")
             tripo_upload_url = "https://api.tripo3d.ai/v2/openapi/upload"
             files = {'file': (image_file.filename, image_bytes, image_file.content_type)}
-            upload_headers = {"Authorization": f"Bearer {API_KEY}"}
-            upload_response = requests.post(tripo_upload_url, headers=upload_headers, files=files)
-            if upload_response.status_code == 403:
-                app.logger.error("Tripo upload 403 Forbidden: Check your TRIPO_API_KEY and Tripo account permissions.")
-                flash("Tripo API error: Forbidden (check your API key and permissions).")
-                return redirect(url_for('upload'))
+            upload_response = requests.post(tripo_upload_url, headers={"Authorization": f"Bearer {API_KEY}"}, files=files)
             upload_response.raise_for_status()
             upload_data = upload_response.json()
             if upload_data.get("code") != 0:
@@ -210,10 +214,6 @@ def upload():
             flash(f"Task key generated: {task_id}")
             return redirect(url_for('models'))
         except requests.RequestException as e:
-            if hasattr(e, 'response') and e.response is not None and e.response.status_code == 403:
-                app.logger.error("Tripo API 403 Forbidden: Check your TRIPO_API_KEY and Tripo account permissions.")
-                flash("Tripo API error: Forbidden (check your API key and permissions).")
-                return redirect(url_for('upload'))
             app.logger.error(f"Tripo API error: {str(e)}")
             flash(f'Tripo API error: {str(e)}')
             return redirect(url_for('upload'))
