@@ -2,6 +2,33 @@
 <html>
 <head>
     <title>My Models</title>
+    <style>
+        table {
+            width: 80%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+            vertical-align: middle;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+        tr:nth-child(even) {
+            background-color: #f9f9f9;
+        }
+        img {
+            max-width: 100px;
+            max-height: 100px;
+            display: block;
+        }
+        progress {
+            width: 100%;
+        }
+    </style>
 </head>
 <body>
     <h1>My Models</h1>
@@ -12,72 +39,108 @@
             {% endfor %}
         {% endif %}
     {% endwith %}
-    {% for model in models %}
-        <div id="model-{{ model.id }}">
-            {% if model.model_url %}
-                <p>Model ready: <a href="{{ model.model_url }}">Download</a></p>
-            {% else %}
-                <p>Received file: {{ model.image_url.split('/')[-1] }}, Type: image/jpeg, User: {{ current_user.username }}</p>
-                <p id="task-id-{{ model.id }}">Task ID: {{ model.task_id }}</p>
-                <p id="status-{{ model.id }}">Status: Processing...</p>
-                <progress id="progress-{{ model.id }}" value="0" max="100"></progress>
-            {% endif %}
-        </div>
+
+    {% if models %}
+    <table>
+        <tr>
+            <th>Name</th>
+            <th>Source Image</th>
+            <th>Status</th>
+            <th>Task ID</th>
+        </tr>
+        {% for model in models %}
+        <tr id="model-row-{{ model.id }}">
+            <td>{{ model.name if model.name else 'Untitled Model' }}</td>
+            <td><img src="{{ model.image_url }}" alt="Source Image"></td>
+            <td id="model-status-{{ model.id }}">
+                {% if model.model_url %}
+                    Model ready: <a href="{{ model.model_url }}">Download</a>
+                {% else %}
+                    <p id="status-{{ model.id }}">Status: Processing...</p>
+                    <progress id="progress-{{ model.id }}" value="0" max="100"></progress>
+                {% endif %}
+            </td>
+            <td>{{ model.task_id or 'N/A' }}</td>
+        </tr>
         {% if not model.model_url %}
         <script>
-            function updateStatus(modelId) {
-                fetch('/status/' + modelId)
-                    .then(response => response.json())
-                    .then(data => {
+            (function() { // IIFE to scope variables
+                const modelId = {{ model.id }};
+                const maxRetries = 3;
+                let retries = 0;
+                let intervalId = null;
+
+                function updateStatus() {
+                    fetch('/status/' + modelId)
+                        .then(response => response.json())
+                        .then(data => {
+                            var statusElement = document.getElementById('status-' + modelId);
+                            var progressElement = document.getElementById('progress-' + modelId);
+                            var modelStatusCell = document.getElementById('model-status-' + modelId);
+
+                            if (!statusElement || !progressElement || !modelStatusCell) {
+                                console.error("Required elements not found for model ID: ", modelId);
+                                if (intervalId) clearInterval(intervalId);
+                                return;
+                            }
+
+                            if (data.status === 'SUCCEEDED') {
+                                if (intervalId) clearInterval(intervalId);
+                                modelStatusCell.innerHTML = '<p>Model ready: <a href="' + data.model_url + '">Download</a></p>';
+                            } else if (data.status === 'IN_PROGRESS') {
+                                statusElement.textContent = 'Status: IN_PROGRESS, Progress: ' + data.progress + '%';
+                                progressElement.value = data.progress;
+                                progressElement.style.display = 'block';
+                                retries = 0; // Reset retries on successful progress update
+                            } else if (data.status === 'ERROR' || data.status === 'FAILED') {
+                                statusElement.textContent = 'Error: ' + (data.error || 'Processing failed') + '. Retrying... (' + (retries + 1) + '/' + maxRetries + ')';
+                                progressElement.style.display = 'none';
+                                retryFetch();
+                            } else {
+                                statusElement.textContent = 'Status: ' + data.status;
+                                progressElement.style.display = 'none';
+                                // Stop polling for unknown or terminal statuses other than success/error handled above
+                                if (intervalId) clearInterval(intervalId); 
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Fetch error for model ' + modelId + ':', error);
+                            var statusElement = document.getElementById('status-' + modelId);
+                             if (statusElement) {
+                                statusElement.textContent = 'Network error checking status. Retrying... (' + (retries + 1) + '/' + maxRetries + ')';
+                             }
+                            retryFetch();
+                        });
+                }
+
+                function retryFetch() {
+                    retries++;
+                    if (retries > maxRetries) {
+                        if (intervalId) clearInterval(intervalId);
                         var statusElement = document.getElementById('status-' + modelId);
                         var progressElement = document.getElementById('progress-' + modelId);
-                        if (data.status === 'SUCCEEDED') {
-                            document.getElementById('model-' + modelId).innerHTML = '<p>Model ready: <a href="' + data.model_url + '">Download</a></p>';
-                        } else if (data.status === 'IN_PROGRESS') {
-                            statusElement.textContent = 'Task Status: IN_PROGRESS, Progress: ' + data.progress + '%';
-                            progressElement.value = data.progress;
-                        } else if (data.status === 'ERROR') {
-                            statusElement.textContent = 'Error: ' + data.error + '. Retrying...';
-                            // Retry up to 3 times with a delay
-                            let retries = 0;
-                            const maxRetries = 3;
-                            const retryInterval = setInterval(() => {
-                                retries++;
-                                fetch('/status/' + modelId)
-                                    .then(r => r.json())
-                                    .then(d => {
-                                        if (d.status === 'SUCCEEDED') {
-                                            clearInterval(retryInterval);
-                                            document.getElementById('model-' + modelId).innerHTML = '<p>Model ready: <a href="' + d.model_url + '">Download</a></p>';
-                                        } else if (retries >= maxRetries) {
-                                            clearInterval(retryInterval);
-                                            statusElement.textContent = 'Failed to load model: ' + d.error;
-                                            progressElement.style.display = 'none';
-                                        }
-                                    })
-                                    .catch(err => {
-                                        if (retries >= maxRetries) {
-                                            clearInterval(retryInterval);
-                                            statusElement.textContent = 'Network error after retries';
-                                            progressElement.style.display = 'none';
-                                        }
-                                    });
-                            }, 5000); // Retry every 5 seconds
-                        } else {
-                            statusElement.textContent = 'Task Status: ' + data.status;
-                            progressElement.style.display = 'none';
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Fetch error:', error);
-                        document.getElementById('status-' + modelId).textContent = 'Network error checking status. Retrying...';
-                    });
-            }
-            updateStatus({{ model.id }});
-            setInterval(() => updateStatus({{ model.id }}), 10000);
+                         if(statusElement) statusElement.textContent = 'Failed to get status after multiple retries.';
+                         if(progressElement) progressElement.style.display = 'none';
+                    } else {
+                       // We already have an interval, the main updateStatus will handle retries implicitly 
+                       // if the status remains ERROR/FAILED or network fails
+                    }
+                }
+
+                // Initial call and set interval
+                if (document.getElementById('model-status-' + modelId).innerHTML.includes('Processing')) {
+                    updateStatus(); // Initial call
+                    intervalId = setInterval(updateStatus, 10000); // Poll every 10 seconds
+                }
+            })();
         </script>
         {% endif %}
     {% endfor %}
+    </table>
+    {% else %}
+        <p>You haven't uploaded any models yet.</p>
+    {% endif %}
+
     <p><a href="{{ url_for('upload') }}">Upload another image</a></p>
     <p><a href="{{ url_for('logout') }}">Logout</a></p>
 </body>

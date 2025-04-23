@@ -7,7 +7,7 @@ from flask_login import LoginManager, UserMixin, login_user, login_required, log
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_wtf import FlaskForm
 from wtforms import StringField, PasswordField, FileField, SubmitField
-from wtforms.validators import DataRequired, EqualTo
+from wtforms.validators import DataRequired, EqualTo, Optional
 import os
 from google.cloud import storage
 import requests
@@ -45,6 +45,7 @@ class User(UserMixin, db.Model):
 class Model(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    name = db.Column(db.String(128), nullable=True) # <-- Added model name field
     image_url = db.Column(db.String(256), nullable=False)
     model_url = db.Column(db.String(256), nullable=True)
     task_id = db.Column(db.String(64), nullable=True)
@@ -67,6 +68,7 @@ class LoginForm(FlaskForm):
 
 class UploadForm(FlaskForm):
     image = FileField('Image', validators=[DataRequired()])
+    name = StringField('Model Name (Optional)', validators=[Optional()]) # <-- Added name field
     submit = SubmitField('Upload')
 
 # Helper Function
@@ -129,6 +131,7 @@ def upload():
         try:
             app.logger.info(f"Uploading image for user {current_user.id}")
             image_file = form.image.data
+            model_name = form.name.data # <-- Get model name
             image_bytes = image_file.read()
             app.logger.info("Image read successfully")
 
@@ -183,7 +186,11 @@ def upload():
             app.logger.info(f"Task created: {task_id}")
 
             # Save task details to database
-            model = Model(user_id=current_user.id, image_url=image_url, task_id=task_id, model_url=None)
+            model = Model(user_id=current_user.id,
+                          name=model_name if model_name else None, # <-- Save name
+                          image_url=image_url,
+                          task_id=task_id,
+                          model_url=None)
             db.session.add(model)
             db.session.commit()
             flash(f"Task key generated: {task_id}")
@@ -206,7 +213,7 @@ def status(model_id):
     model = Model.query.get_or_404(model_id)
     if model.user_id != current_user.id:
         return jsonify({"error": "Unauthorized"}), 403
-    
+
     # Step 1: Check if model_url is already set
     if model.model_url:
         app.logger.info(f"Model {model.id} already has model_url: {model.model_url}")
@@ -253,7 +260,7 @@ def status(model_id):
             result = task_status["data"].get("result")
             if result:
                 # Try "model" first (non-PBR), then "pbr_model" (PBR)
-                glb_url = (result.get("model", {}).get("url") or 
+                glb_url = (result.get("model", {}).get("url") or
                           result.get("pbr_model", {}).get("url"))
                 if glb_url:
                     glb_response = requests.get(glb_url, timeout=15)
@@ -315,6 +322,7 @@ def admin_panel():
             'id': model.id,
             'user_id': model.user_id,
             'username': User.query.get(model.user_id).username if User.query.get(model.user_id) else 'Deleted User',
+            'name': model.name, # <-- Include name
             'image_url': model.image_url,
             'model_url': model.model_url,
             'task_id': model.task_id
@@ -353,7 +361,7 @@ def api_signup():
 @login_required
 def api_get_models():
     models = Model.query.filter_by(user_id=current_user.id).all()
-    model_list = [{'id': m.id, 'image_url': m.image_url, 'model_url': m.model_url} for m in models]
+    model_list = [{'id': m.id, 'name': m.name, 'image_url': m.image_url, 'model_url': m.model_url} for m in models] # <-- Include name
     return jsonify({'success': True, 'models': model_list})
 
 # Initialize database
@@ -366,7 +374,9 @@ with app.app_context():
         db.session.add(admin)
     else:
         admin.is_admin = True
-        admin.set_password('admin123')
+        # Ensure password is set/updated if needed (optional, depends on policy)
+        if not admin.check_password('admin123'):
+             admin.set_password('admin123')
     db.session.commit()
     app.logger.info("Admin user 'admin' ensured with password 'admin123'")
 

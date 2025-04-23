@@ -12,12 +12,18 @@
             border: 1px solid #ddd;
             padding: 8px;
             text-align: left;
+            vertical-align: middle; /* Align content vertically */
         }
         th {
             background-color: #f2f2f2;
         }
         tr:nth-child(even) {
             background-color: #f9f9f9;
+        }
+        img {
+            max-width: 60px; /* Smaller image in admin panel */
+            max-height: 60px;
+            display: block;
         }
     </style>
 </head>
@@ -53,7 +59,8 @@
             <th>ID</th>
             <th>User ID</th>
             <th>Username</th>
-            <th>Image URL</th>
+            <th>Model Name</th> <!-- Added Model Name column -->
+            <th>Image</th>
             <th>Model URL</th>
             <th>Task ID</th>
             <th>Status</th>
@@ -62,8 +69,9 @@
         <tr>
             <td>{{ model.id }}</td>
             <td>{{ model.user_id }}</td>
-            <td>{{ model.username }}</td>  <!-- Use pre-fetched username -->
-            <td><a href="{{ model.image_url }}">{{ model.image_url.split('/')[-1] }}</a></td>
+            <td>{{ model.username }}</td>
+            <td>{{ model.name if model.name else 'Untitled' }}</td> <!-- Display model name -->
+            <td><a href="{{ model.image_url }}" target="_blank"><img src="{{ model.image_url }}" alt="Source Image"></a></td>
             <td>
                 {% if model.model_url %}
                     <a href="{{ model.model_url }}">{{ model.model_url.split('/')[-1] }}</a>

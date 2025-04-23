@@ -4,25 +4,27 @@
     <title>Upload Image</title>
 </head>
 <body>
-    <h1>Upload Image for 3D Model Generation</h1>
+    <h1>Upload Image to Generate 3D Model</h1>
     {% with messages = get_flashed_messages() %}
         {% if messages %}
             {% for message in messages %}
-                <p style="color: {% if 'error' in message.lower() %}red{% else %}green{% endif %};">{{ message }}</p>
+                <p>{{ message }}</p>
             {% endfor %}
         {% endif %}
     {% endwith %}
-    <form method="POST" enctype="multipart/form-data">
+    <form method="post" enctype="multipart/form-data">
         {{ form.hidden_tag() }}
         <p>
             {{ form.image.label }}<br>
             {{ form.image() }}
         </p>
+        <p>
+            {{ form.name.label }}<br> <!-- Added name field label -->
+            {{ form.name() }}     <!-- Added name field input -->
+        </p>
         <p>{{ form.submit() }}</p>
     </form>
-    <p>
-        <a href="{{ url_for('models') }}">View Models</a> |
-        <a href="{{ url_for('logout') }}">Logout</a>
-    </p>
+    <p><a href="{{ url_for('models') }}">View My Models</a></p>
+    <p><a href="{{ url_for('logout') }}">Logout</a></p>
 </body>
 </html>
