@@ -105,7 +105,7 @@
     <table>
         <tr>
             <th>Source Image</th>
-            <th>Status</th>
+            <th>3D Model</th>
             <th>Task ID</th>
             <th>Delete</th>
         </tr>
@@ -230,7 +230,9 @@
             modalBody.innerHTML = '<img src="' + url + '" alt="Source Image">';
         } else if (type === 'model') {
             modalBody.innerHTML = `
-                <model-viewer src="` + url + `" alt="3D Model" auto-rotate camera-controls background-color="#fff"></model-viewer>
+                <model-viewer src="` + url + `" alt="3D Model" auto-rotate camera-controls background-color="#fff" ar ar-modes="webxr scene-viewer quick-look">
+                  <div style="color:#c00;">Your browser does not support 3D model viewing.</div>
+                </model-viewer>
                 <div style="margin-top:10px;">
                     <a href="` + url + `" target="_blank">Download .glb</a>
                 </div>
