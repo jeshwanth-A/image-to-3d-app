@@ -377,6 +377,19 @@ def api_get_models():
 # Initialize database
 with app.app_context():
     db.create_all()
+    # --- Add this block for SQLite quick-fix migration ---
+    import sqlite3
+    db_path = app.config['SQLALCHEMY_DATABASE_URI'].replace('sqlite:///', '')
+    if os.path.exists(db_path):
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(model);")
+        columns = [row[1] for row in cursor.fetchall()]
+        if 'task_id' not in columns:
+            cursor.execute("ALTER TABLE model ADD COLUMN task_id VARCHAR(64);")
+            conn.commit()
+        conn.close()
+    # --- End SQLite quick-fix migration ---
     admin = User.query.filter_by(username='admin').first()
     if not admin:
         admin = User(username='admin', is_admin=True)
