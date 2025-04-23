@@ -1,137 +1,419 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Admin Panel</title>
-    <style>
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin: 20px 0;
-        }
-        th, td {
-            border: 1px solid #ddd;
-            padding: 8px;
-            text-align: left;
-            vertical-align: middle; /* Align content vertically */
-        }
-        th {
-            background-color: #f2f2f2;
-        }
-        tr:nth-child(even) {
-            background-color: #f9f9f9;
-        }
-        img {
-            max-width: 60px; /* Smaller image in admin panel */
-            max-height: 60px;
-            display: block;
-        }
-        .delete-btn {
-            background: none;
-            border: none;
-            color: #c00;
-            font-size: 1.2em;
-            cursor: pointer;
-        }
+{% extends "base.html" %}
+
+{% block title %}Admin Panel{% endblock %}
+
+{% block styles %}
+<style>
+    .admin-section {
+        margin-bottom: 2rem;
+    }
+    
+    .table-responsive {
+        overflow-x: auto;
+        box-shadow: var(--shadow);
+        border-radius: 8px;
+    }
+    
+    .table-responsive table {
+        min-width: 100%;
+        margin-bottom: 0;
+    }
+    
+    .table-responsive th, 
+    .table-responsive td {
+        white-space: nowrap;
+        vertical-align: middle;
+    }
+    
+    .admin-card {
+        background-color: white;
+        border-radius: 8px;
+        padding: 1.5rem;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        margin-bottom: 1.5rem;
+    }
+    
+    .stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+    }
+    
+    .stat-card {
+        background-color: white;
+        border-radius: 8px;
+        padding: 1rem;
+        text-align: center;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+    }
+    
+    .stat-number {
+        font-size: 2rem;
+        font-weight: bold;
+        color: var(--primary-color);
+    }
+    
+    .stat-label {
+        color: var(--text-light);
+        font-size: 0.9rem;
+    }
+    
+    .model-thumbnail {
+        max-width: 60px;
+        max-height: 60px;
+        cursor: pointer;
+    }
+    
+    .status-badge {
+        display: inline-block;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 0.8rem;
+        font-weight: 500;
+        text-align: center;
+    }
+    
+    .status-completed {
+        background-color: #c8e6c9;
+        color: #2e7d32;
+    }
+    
+    .status-processing {
+        background-color: #ffecb5;
+        color: #975e00;
+    }
+    
+    .status-pending {
+        background-color: #e1f5fe;
+        color: #0277bd;
+    }
+    
+    .rename-form {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    
+    .rename-input {
+        width: 90%;
+        padding: 6px;
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+    }
+    
+    .rename-btn {
+        padding: 6px 10px;
+        background-color: var(--light-gray);
+        border: 1px solid var(--border-color);
+        border-radius: 4px;
+        cursor: pointer;
+    }
+    
+    .delete-btn {
+        color: var(--danger-color);
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 1rem;
+    }
+    
+    .modal-body img {
+        max-width: 100%;
+        height: auto;
+    }
+    
+    @media (max-width: 768px) {
         .rename-form {
-            display: inline;
+            flex-direction: column;
+            align-items: stretch;
         }
+        
         .rename-input {
-            width: 90px;
-            font-size: 0.95em;
-            padding: 2px 4px;
+            width: 100%;
         }
-        .rename-btn {
-            background: #e0e0e0;
-            border: 1px solid #bbb;
-            color: #333;
-            font-size: 0.9em;
-            padding: 2px 6px;
-            border-radius: 4px;
-            cursor: pointer;
-            margin-left: 2px;
-        }
-        .rename-btn:hover {
-            background: #d0d0d0;
-        }
-    </style>
-</head>
-<body>
-    <h1>Admin Panel</h1>
-    {% with messages = get_flashed_messages() %}
-        {% if messages %}
-            {% for message in messages %}
-                <p>{{ message }}</p>
-            {% endfor %}
-        {% endif %}
-    {% endwith %}
+    }
+</style>
+{% endblock %}
 
+{% block content %}
+<h1>Admin Dashboard</h1>
+
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-number">{{ users|length }}</div>
+        <div class="stat-label">TOTAL USERS</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-number">{{ models|length }}</div>
+        <div class="stat-label">TOTAL MODELS</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-number">{{ models|selectattr('model_url')|list|length }}</div>
+        <div class="stat-label">COMPLETED MODELS</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-number">{{ models|rejectattr('model_url')|list|length }}</div>
+        <div class="stat-label">PROCESSING MODELS</div>
+    </div>
+</div>
+
+<div class="admin-section">
     <h2>Users</h2>
-    <table>
-        <tr>
-            <th>ID</th>
-            <th>Username</th>
-            <th>Is Admin</th>
-        </tr>
-        {% for user in users %}
-        <tr>
-            <td>{{ user.id }}</td>
-            <td>{{ user.username }}</td>
-            <td>{{ 'Yes' if user.is_admin else 'No' }}</td>
-        </tr>
-        {% endfor %}
-    </table>
+    <div class="table-responsive">
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Username</th>
+                    <th>Models</th>
+                    <th>Admin</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for user in users %}
+                <tr>
+                    <td>{{ user.id }}</td>
+                    <td>{{ user.username }}</td>
+                    <td>{{ models|selectattr('user_id', 'equalto', user.id)|list|length }}</td>
+                    <td>
+                        <span class="status-badge {% if user.is_admin %}status-completed{% else %}status-pending{% endif %}">
+                            {{ 'Yes' if user.is_admin else 'No' }}
+                        </span>
+                    </td>
+                    <td>
+                        <button class="btn btn-light btn-sm" onclick="alert('User management coming soon!')">
+                            <i class="fas fa-user-cog"></i> Manage
+                        </button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
 
+<div class="admin-section">
     <h2>Models</h2>
-    <table>
-        <tr>
-            <th>ID</th>
-            <th>User ID</th>
-            <th>Username</th>
-            <th>Model Name</th>
-            <th>Image</th>
-            <th>Model URL</th>
-            <th>Task ID</th>
-            <th>Status</th>
-            <th>Delete</th>
-        </tr>
-        {% for model in models %}
-        <tr>
-            <td>{{ model.id }}</td>
-            <td>{{ model.user_id }}</td>
-            <td>{{ model.username }}</td>
-            <td>
-                <form class="rename-form" method="POST" action="{{ url_for('admin_rename_model', model_id=model.id) }}">
-                    <input class="rename-input" type="text" name="name" value="{{ model.name or model.image_url.split('/')[-1].rsplit('.', 1)[0] }}">
-                    <button class="rename-btn" type="submit">Rename</button>
-                </form>
-            </td>
-            <td><a href="{{ model.image_url }}" target="_blank"><img src="{{ model.image_url }}" alt="Source Image"></a></td>
-            <td>
-                {% if model.model_url %}
-                    <a href="{{ model.model_url }}">{{ model.model_url.split('/')[-1] }}</a>
-                {% else %}
-                    Not Generated
-                {% endif %}
-            </td>
-            <td>{{ model.task_id or 'N/A' }}</td>
-            <td>
-                {% if model.model_url %}
-                    Completed
-                {% elif model.task_id %}
-                    Processing
-                {% else %}
-                    Pending
-                {% endif %}
-            </td>
-            <td>
-                <form method="POST" action="{{ url_for('admin_delete_model', model_id=model.id) }}" style="display:inline;" onsubmit="return confirm('Are you sure you want to delete this model?');">
-                    <button type="submit" class="delete-btn" title="Delete">&#128465;</button>
-                </form>
-            </td>
-        </tr>
-        {% endfor %}
-    </table>
+    <div class="table-responsive">
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>User</th>
+                    <th>Model Name</th>
+                    <th>Image</th>
+                    <th>3D Model</th>
+                    <th>Task ID</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for model in models %}
+                <tr>
+                    <td>{{ model.id }}</td>
+                    <td>{{ model.username }}</td>
+                    <td>
+                        <form class="rename-form" method="POST" action="{{ url_for('admin_rename_model', model_id=model.id) }}">
+                            <input class="rename-input" type="text" name="name" value="{{ model.name or model.image_url.split('/')[-1].rsplit('.', 1)[0] }}">
+                            <button class="rename-btn" type="submit">
+                                <i class="fas fa-check"></i>
+                            </button>
+                        </form>
+                    </td>
+                    <td>
+                        <img src="{{ model.image_url }}" alt="Source Image" class="model-thumbnail" 
+                             onclick="showModal('image', '{{ model.image_url }}')">
+                    </td>
+                    <td>
+                        {% if model.model_url %}
+                            <a href="{{ model.model_url }}" class="btn btn-primary btn-sm">
+                                <i class="fas fa-download"></i> Download
+                            </a>
+                            <button class="btn btn-light btn-sm" onclick="showModal('model', '{{ model.model_url }}')">
+                                <i class="fas fa-eye"></i> View
+                            </button>
+                        {% else %}
+                            <span>Not Generated</span>
+                        {% endif %}
+                    </td>
+                    <td><span style="font-size: 0.9em;">{{ model.task_id or 'N/A' }}</span></td>
+                    <td>
+                        {% if model.model_url %}
+                            <span class="status-badge status-completed">Completed</span>
+                        {% elif model.task_id %}
+                            <span class="status-badge status-processing">Processing</span>
+                        {% else %}
+                            <span class="status-badge status-pending">Pending</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <form method="POST" action="{{ url_for('admin_delete_model', model_id=model.id) }}" 
+                              style="display:inline;" 
+                              onsubmit="return confirm('Are you sure you want to delete this model?');">
+                            <button type="submit" class="delete-btn" title="Delete">
+                                <i class="fas fa-trash-alt"></i>
+                            </button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
 
-    <p><a href="{{ url_for('logout') }}">Logout</a></p>
-</body>
-</html>
+<!-- Modal for viewing image or model -->
+<div id="viewModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3 id="modalTitle">Preview</h3>
+            <span class="close-modal" onclick="closeModal()">&times;</span>
+        </div>
+        <div class="modal-body" id="modalBody"></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+
+<script>
+    let scene, camera, renderer, controls;
+
+    function clearThreeJS() {
+        if (scene) {
+            while(scene.children.length > 0){ 
+                scene.remove(scene.children[0]); 
+            }
+        }
+        if (renderer) {
+            renderer.forceContextLoss();
+            renderer.domElement = null;
+            renderer = null;
+        }
+        scene = null;
+        camera = null;
+        controls = null;
+    }
+
+    function initThreeJS() {
+        clearThreeJS();
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xf5f5f5);
+
+        const modalBody = document.getElementById('modalBody');
+        const width = modalBody.clientWidth;
+        const height = Math.min(500, window.innerHeight * 0.6);
+
+        camera = new THREE.PerspectiveCamera(75, width/height, 0.1, 1000);
+        camera.position.set(0, 1, 3);
+
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(width, height);
+
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(ambientLight);
+        
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        directionalLight.position.set(1, 1, 1);
+        scene.add(directionalLight);
+
+        controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        
+        return renderer;
+    }
+
+    function loadModel(url) {
+        const loadingDiv = document.createElement('div');
+        loadingDiv.id = "loading-indicator";
+        loadingDiv.innerHTML = '<div style="text-align: center; padding: 20px;"><i class="fas fa-spinner fa-spin"></i> Loading 3D Model...</div>';
+        document.getElementById('modalBody').appendChild(loadingDiv);
+        
+        const loader = new THREE.GLTFLoader();
+        loader.load(
+            url,
+            function (gltf) {
+                const loadingIndicator = document.getElementById('loading-indicator');
+                if (loadingIndicator) loadingIndicator.remove();
+                
+                scene.add(gltf.scene);
+                
+                // Center and scale the model
+                const box = new THREE.Box3().setFromObject(gltf.scene);
+                const center = box.getCenter(new THREE.Vector3());
+                const size = box.getSize(new THREE.Vector3());
+                
+                const maxDim = Math.max(size.x, size.y, size.z);
+                const scale = 2 / maxDim;
+                gltf.scene.scale.set(scale, scale, scale);
+                
+                gltf.scene.position.x = -center.x * scale;
+                gltf.scene.position.y = -center.y * scale;
+                gltf.scene.position.z = -center.z * scale;
+            },
+            undefined,
+            function (error) {
+                document.getElementById('modalBody').innerHTML = '<div style="color: red; text-align: center; padding: 20px;">Failed to load 3D model.</div>';
+            }
+        );
+    }
+
+    function animate() {
+        if (!renderer) return;
+        requestAnimationFrame(animate);
+        if (controls) controls.update();
+        renderer.render(scene, camera);
+    }
+
+    function showModal(type, url) {
+        const modal = document.getElementById('viewModal');
+        const modalBody = document.getElementById('modalBody');
+        const modalTitle = document.getElementById('modalTitle');
+        
+        modalBody.innerHTML = '';
+        
+        if (type === 'image') {
+            modalTitle.textContent = 'Image Preview';
+            const img = document.createElement('img');
+            img.src = url;
+            img.alt = 'Source Image';
+            modalBody.appendChild(img);
+            
+        } else if (type === 'model') {
+            modalTitle.textContent = '3D Model Preview';
+            const renderer = initThreeJS();
+            modalBody.appendChild(renderer.domElement);
+            loadModel(url);
+            animate();
+            
+            const downloadBtn = document.createElement('div');
+            downloadBtn.style.textAlign = 'center';
+            downloadBtn.style.marginTop = '15px';
+            downloadBtn.innerHTML = `<a href="${url}" class="btn btn-primary"><i class="fas fa-download"></i> Download Model</a>`;
+            modalBody.appendChild(downloadBtn);
+        }
+        
+        modal.style.display = 'block';
+    }
+
+    function closeModal() {
+        document.getElementById('viewModal').style.display = 'none';
+        clearThreeJS();
+    }
+
+    // Close modal on outside click
+    window.onclick = function(event) {
+        const modal = document.getElementById('viewModal');
+        if (event.target == modal) {
+            closeModal();
+        }
+    }
+</script>
+{% endblock %}

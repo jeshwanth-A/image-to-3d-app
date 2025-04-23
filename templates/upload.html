@@ -1,30 +1,149 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Upload Image</title>
-</head>
-<body>
-    <h1>Upload Image to Generate 3D Model</h1>
-    {% with messages = get_flashed_messages() %}
-        {% if messages %}
-            {% for message in messages %}
-                <p>{{ message }}</p>
-            {% endfor %}
-        {% endif %}
-    {% endwith %}
-    <form method="post" enctype="multipart/form-data">
+{% extends "base.html" %}
+
+{% block title %}Upload Image{% endblock %}
+
+{% block styles %}
+<style>
+    .upload-container {
+        border: 2px dashed var(--border-color);
+        border-radius: 8px;
+        padding: 2rem;
+        text-align: center;
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+    
+    .upload-container:hover {
+        border-color: var(--primary-color);
+    }
+    
+    .upload-icon {
+        font-size: 3rem;
+        color: var(--primary-color);
+        margin-bottom: 1rem;
+    }
+    
+    .hidden-input {
+        display: none;
+    }
+    
+    #image-preview {
+        max-width: 100%;
+        max-height: 300px;
+        margin: 1rem auto;
+        border-radius: 8px;
+        display: none;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="card">
+    <h1 class="text-center">Upload Image to Generate 3D Model</h1>
+    
+    <form method="post" enctype="multipart/form-data" id="upload-form">
         {{ form.hidden_tag() }}
-        <p>
-            {{ form.image.label }}<br>
-            {{ form.image() }}
-        </p>
-        <p>
-            {{ form.name.label }}<br>
-            {{ form.name(size=32) }}
-        </p>
-        <p>{{ form.submit() }}</p>
+        
+        <div class="form-group">
+            <label for="name">Model Name (optional)</label>
+            {{ form.name(class="form-control", placeholder="Give your model a name") }}
+        </div>
+        
+        <div class="upload-container" id="upload-container">
+            <div class="upload-icon">
+                <i class="fas fa-cloud-upload-alt"></i>
+            </div>
+            <h3>Drag & Drop or Click to Upload</h3>
+            <p>Supported formats: JPG, PNG, GIF</p>
+            {{ form.image(class="hidden-input", id="file-input") }}
+        </div>
+        
+        <img id="image-preview" src="#" alt="Preview">
+        
+        <div class="form-group text-center mt-3">
+            {{ form.submit(class="btn btn-primary", value="Generate 3D Model") }}
+        </div>
     </form>
-    <p><a href="{{ url_for('models') }}">View My Models</a></p>
-    <p><a href="{{ url_for('logout') }}">Logout</a></p>
-</body>
-</html>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const uploadContainer = document.getElementById('upload-container');
+        const fileInput = document.getElementById('file-input');
+        const imagePreview = document.getElementById('image-preview');
+        const form = document.getElementById('upload-form');
+        
+        uploadContainer.addEventListener('click', function() {
+            fileInput.click();
+        });
+        
+        uploadContainer.addEventListener('dragover', function(e) {
+            e.preventDefault();
+            uploadContainer.style.borderColor = var(--primary-color);
+            uploadContainer.style.backgroundColor = 'rgba(66, 133, 244, 0.05)';
+        });
+        
+        uploadContainer.addEventListener('dragleave', function(e) {
+            e.preventDefault();
+            uploadContainer.style.borderColor = var(--border-color);
+            uploadContainer.style.backgroundColor = 'transparent';
+        });
+        
+        uploadContainer.addEventListener('drop', function(e) {
+            e.preventDefault();
+            uploadContainer.style.borderColor = var(--border-color);
+            uploadContainer.style.backgroundColor = 'transparent';
+            
+            const files = e.dataTransfer.files;
+            if (files.length) {
+                fileInput.files = files;
+                updateImagePreview();
+            }
+        });
+        
+        fileInput.addEventListener('change', updateImagePreview);
+        
+        function updateImagePreview() {
+            if (fileInput.files && fileInput.files[0]) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    imagePreview.src = e.target.result;
+                    imagePreview.style.display = 'block';
+                    uploadContainer.style.display = 'none';
+                }
+                reader.readAsDataURL(fileInput.files[0]);
+                
+                // Auto-fill the name field if empty
+                const nameInput = document.getElementById('name');
+                if (!nameInput.value) {
+                    const fileName = fileInput.files[0].name;
+                    nameInput.value = fileName.split('.').slice(0, -1).join('.');
+                }
+            }
+        }
+        
+        // Reset button to re-select image
+        const resetBtn = document.createElement('button');
+        resetBtn.type = 'button';
+        resetBtn.className = 'btn btn-light mt-2';
+        resetBtn.textContent = 'Choose Different Image';
+        resetBtn.style.display = 'none';
+        imagePreview.insertAdjacentElement('afterend', resetBtn);
+        
+        resetBtn.addEventListener('click', function() {
+            imagePreview.style.display = 'none';
+            uploadContainer.style.display = 'block';
+            resetBtn.style.display = 'none';
+            fileInput.value = '';
+        });
+        
+        fileInput.addEventListener('change', function() {
+            if (fileInput.files && fileInput.files[0]) {
+                resetBtn.style.display = 'block';
+            }
+        });
+    });
+</script>
+{% endblock %}
