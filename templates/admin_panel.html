@@ -32,6 +32,27 @@
             font-size: 1.2em;
             cursor: pointer;
         }
+        .rename-form {
+            display: inline;
+        }
+        .rename-input {
+            width: 90px;
+            font-size: 0.95em;
+            padding: 2px 4px;
+        }
+        .rename-btn {
+            background: #e0e0e0;
+            border: 1px solid #bbb;
+            color: #333;
+            font-size: 0.9em;
+            padding: 2px 6px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-left: 2px;
+        }
+        .rename-btn:hover {
+            background: #d0d0d0;
+        }
     </style>
 </head>
 <body>
@@ -66,7 +87,7 @@
             <th>ID</th>
             <th>User ID</th>
             <th>Username</th>
-            <th>Model Name</th> <!-- Added Model Name column -->
+            <th>Model Name</th>
             <th>Image</th>
             <th>Model URL</th>
             <th>Task ID</th>
@@ -78,7 +99,12 @@
             <td>{{ model.id }}</td>
             <td>{{ model.user_id }}</td>
             <td>{{ model.username }}</td>
-            <td>{{ model.name if model.name else 'Untitled' }}</td> <!-- Display model name -->
+            <td>
+                <form class="rename-form" method="POST" action="{{ url_for('admin_rename_model', model_id=model.id) }}">
+                    <input class="rename-input" type="text" name="name" value="{{ model.name or model.image_url.split('/')[-1].rsplit('.', 1)[0] }}">
+                    <button class="rename-btn" type="submit">Rename</button>
+                </form>
+            </td>
             <td><a href="{{ model.image_url }}" target="_blank"><img src="{{ model.image_url }}" alt="Source Image"></a></td>
             <td>
                 {% if model.model_url %}

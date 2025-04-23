@@ -48,6 +48,7 @@ class Model(db.Model):
     image_url = db.Column(db.String(256), nullable=False)
     model_url = db.Column(db.String(256), nullable=True)
     task_id = db.Column(db.String(64), nullable=True)
+    name = db.Column(db.String(128), nullable=True)  # New: model name
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -68,6 +69,10 @@ class LoginForm(FlaskForm):
 class UploadForm(FlaskForm):
     image = FileField('Image', validators=[DataRequired()])
     submit = SubmitField('Upload')
+
+class RenameModelForm(FlaskForm):
+    name = StringField('Model Name', validators=[DataRequired()])
+    submit = SubmitField('Rename')
 
 # Helper Function
 def image_to_data_uri(image_bytes: bytes, content_type: str) -> str:
@@ -162,7 +167,15 @@ def upload():
                 return redirect(url_for('upload'))
             app.logger.info(f"Task created: {task_id}")
 
-            model = Model(user_id=current_user.id, image_url=image_url, task_id=task_id, model_url=None)
+            # Default model name: filename without extension
+            base_name = os.path.splitext(image_file.filename)[0]
+            model = Model(
+                user_id=current_user.id,
+                image_url=image_url,
+                task_id=task_id,
+                model_url=None,
+                name=base_name
+            )
             db.session.add(model)
             db.session.commit()
             flash(f"Task key generated: {task_id}")
@@ -298,6 +311,32 @@ def delete_model(model_id):
     flash('Model deleted successfully.')
     return redirect(url_for('models'))
 
+@app.route('/rename_model/<int:model_id>', methods=['POST'])
+@login_required
+def rename_model(model_id):
+    model = Model.query.get_or_404(model_id)
+    if model.user_id != current_user.id:
+        abort(403)
+    new_name = request.form.get('name', '').strip()
+    if new_name:
+        model.name = new_name
+        db.session.commit()
+        flash('Model renamed successfully.')
+    return redirect(url_for('models'))
+
+@app.route('/admin_rename_model/<int:model_id>', methods=['POST'])
+@login_required
+def admin_rename_model(model_id):
+    if not current_user.is_admin:
+        abort(403)
+    model = Model.query.get_or_404(model_id)
+    new_name = request.form.get('name', '').strip()
+    if new_name:
+        model.name = new_name
+        db.session.commit()
+        flash('Model renamed successfully.')
+    return redirect(url_for('admin_panel'))
+
 @app.route('/admin_delete_model/<int:model_id>', methods=['POST'])
 @login_required
 def admin_delete_model(model_id):
@@ -350,7 +389,8 @@ def admin_panel():
             'username': User.query.get(model.user_id).username if User.query.get(model.user_id) else 'Deleted User',
             'image_url': model.image_url,
             'model_url': model.model_url,
-            'task_id': model.task_id
+            'task_id': model.task_id,
+            'name': model.name
         }
         for model in models
     ]
