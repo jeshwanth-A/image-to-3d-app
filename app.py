@@ -1,6 +1,7 @@
 import time
 import base64
 import logging
+import datetime
 from flask import Flask, render_template, redirect, url_for, flash, request, jsonify, abort
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
@@ -48,7 +49,8 @@ class Model(db.Model):
     image_url = db.Column(db.String(256), nullable=False)
     model_url = db.Column(db.String(256), nullable=True)
     task_id = db.Column(db.String(64), nullable=True)
-    name = db.Column(db.String(128), nullable=True)  # New: model name
+    name = db.Column(db.String(128), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)  # Add timestamp
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -372,7 +374,7 @@ def admin_delete_model(model_id):
 @app.route('/models', methods=['GET'])
 @login_required
 def models():
-    user_models = Model.query.filter_by(user_id=current_user.id).all()
+    user_models = Model.query.filter_by(user_id=current_user.id).order_by(Model.created_at.desc()).all()
     app.logger.info(f"Found {len(user_models)} models for user {current_user.id}")
     return render_template('models.html', models=user_models)
 
