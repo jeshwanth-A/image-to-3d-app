@@ -12,9 +12,11 @@ from wtforms.validators import DataRequired, EqualTo
 import os
 from google.cloud import storage
 import requests
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 # Setup Flask app
 app = Flask(__name__)
+# Make sure this is set to a constant value in your environment, not generated randomly
 app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'default-secret-key-for-dev')
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///app.db')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
@@ -22,6 +24,9 @@ app.debug = True  # <--- Add this line for debugging
 db = SQLAlchemy(app)
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
+
+# If running behind a proxy (like on Cloud Run), add:
+app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
