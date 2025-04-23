@@ -1,7 +1,7 @@
 import time
 import base64
 import logging
-from flask import Flask, render_template, redirect, url_for, flash, request, jsonify
+from flask import Flask, render_template, redirect, url_for, flash, request, jsonify, abort
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -177,8 +177,6 @@ def upload():
             return redirect(url_for('upload'))
     return render_template('upload.html', form=form)
 
-# ... (Previous imports and setup remain unchanged)
-
 @app.route('/status/<int:model_id>', methods=['GET'])
 @login_required
 def status(model_id):
@@ -270,9 +268,37 @@ def status(model_id):
         app.logger.error(f"Unexpected error in status: {str(e)}")
         return jsonify({"status": "ERROR", "error": "Unexpected error: " + str(e)}), 500
 
-# ... (Rest of the app.py remains unchanged)
+@app.route('/delete_model/<int:model_id>', methods=['POST'])
+@login_required
+def delete_model(model_id):
+    model = Model.query.get_or_404(model_id)
+    if model.user_id != current_user.id:
+        abort(403)
+    # Remove model file from GCS if exists
+    try:
+        storage_client = storage.Client()
+        bucket = storage_client.bucket(os.environ['BUCKET_NAME'])
+        # Remove image
+        if model.image_url:
+            image_path = '/'.join(model.image_url.split('/')[-3:])
+            image_blob = bucket.blob(image_path)
+            if image_blob.exists():
+                image_blob.delete()
+        # Remove model file
+        if model.model_url:
+            model_path = '/'.join(model.model_url.split('/')[-3:])
+            model_blob = bucket.blob(model_path)
+            if model_blob.exists():
+                model_blob.delete()
+    except Exception as e:
+        app.logger.error(f"Error deleting files from GCS: {str(e)}")
+    # Remove from DB
+    db.session.delete(model)
+    db.session.commit()
+    flash('Model deleted successfully.')
+    return redirect(url_for('models'))
 
-@app.route('/models')
+@app.route('/models', methods=['GET'])
 @login_required
 def models():
     user_models = Model.query.filter_by(user_id=current_user.id).all()
