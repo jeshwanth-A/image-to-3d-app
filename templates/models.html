@@ -43,14 +43,12 @@
     {% if models %}
     <table>
         <tr>
-            <th>Name</th>
             <th>Source Image</th>
             <th>Status</th>
             <th>Task ID</th>
         </tr>
         {% for model in models %}
         <tr id="model-row-{{ model.id }}">
-            <td>{{ model.name if model.name else 'Untitled Model' }}</td>
             <td><img src="{{ model.image_url }}" alt="Source Image"></td>
             <td id="model-status-{{ model.id }}">
                 {% if model.model_url %}
