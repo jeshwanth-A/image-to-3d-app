@@ -7,7 +7,7 @@ from flask_login import LoginManager, UserMixin, login_user, login_required, log
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_wtf import FlaskForm
 from wtforms import StringField, PasswordField, FileField, SubmitField
-from wtforms.validators import DataRequired, EqualTo, Optional
+from wtforms.validators import DataRequired, EqualTo
 import os
 from google.cloud import storage
 import requests
@@ -24,11 +24,6 @@ login_manager.login_view = 'login'
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 app.logger.setLevel(logging.INFO)
-
-# Ensure BUCKET_NAME is set
-BUCKET_NAME = os.environ.get('BUCKET_NAME')
-if not BUCKET_NAME:
-    logging.error("Environment variable BUCKET_NAME is not set. Please set BUCKET_NAME for Google Cloud Storage.")
 
 # Load Meshy API Key
 API_KEY = os.environ.get("MESHY_API_KEY")
@@ -50,7 +45,6 @@ class User(UserMixin, db.Model):
 class Model(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    name = db.Column(db.String(128), nullable=True) # <-- Added model name field
     image_url = db.Column(db.String(256), nullable=False)
     model_url = db.Column(db.String(256), nullable=True)
     task_id = db.Column(db.String(64), nullable=True)
@@ -73,7 +67,6 @@ class LoginForm(FlaskForm):
 
 class UploadForm(FlaskForm):
     image = FileField('Image', validators=[DataRequired()])
-    name = StringField('Model Name (Optional)', validators=[Optional()]) # <-- Added name field
     submit = SubmitField('Upload')
 
 # Helper Function
@@ -136,77 +129,47 @@ def upload():
         try:
             app.logger.info(f"Uploading image for user {current_user.id}")
             image_file = form.image.data
-            model_name = form.name.data # <-- Get model name
             image_bytes = image_file.read()
             app.logger.info("Image read successfully")
 
-            if not BUCKET_NAME:
-                flash('Server misconfiguration: BUCKET_NAME is not set.')
-                return redirect(url_for('upload'))
-
-            # Upload image to Google Cloud Storage
             storage_client = storage.Client()
-            bucket = storage_client.bucket(BUCKET_NAME)
+            bucket = storage_client.bucket(os.environ['BUCKET_NAME'])
             filename = f'images/{current_user.id}/{image_file.filename}'
             blob = bucket.blob(filename)
             blob.upload_from_string(image_bytes, content_type=image_file.content_type)
             image_url = blob.public_url
             app.logger.info(f"Image uploaded to {image_url}")
 
-            if not API_KEY:  # Still MESHY_API_KEY, now holding Tripo’s key
-                flash('API key not configured.')
+            if not API_KEY:
+                flash('Meshy API key not configured.')
                 return redirect(url_for('upload'))
 
-            # Step 1: Upload image to Tripo API
-            app.logger.info("Uploading image to Tripo API")
-            tripo_upload_url = "https://api.tripo3d.ai/v2/openapi/upload"
-            files = {'file': (image_file.filename, image_bytes, image_file.content_type)}
-            upload_response = requests.post(tripo_upload_url, headers={"Authorization": f"Bearer {API_KEY}"}, files=files)
-            upload_response.raise_for_status()
-            upload_data = upload_response.json()
-            if upload_data.get("code") != 0:
-                app.logger.error(f"Tripo upload failed: {upload_data}")
-                flash(f"Tripo upload failed: {upload_data.get('message', 'Unknown error')}")
-                return redirect(url_for('upload'))
-            image_token = upload_data["data"]["image_token"]
-            app.logger.info(f"Tripo image token: {image_token}")
-
-            # Step 2: Start image-to-3D task with Tripo API
-            app.logger.info("Calling Tripo API to start image-to-3D task")
-            tripo_task_url = "https://api.tripo3d.ai/v2/openapi/task"
+            image_data_uri = image_to_data_uri(image_bytes, image_file.content_type)
             payload = {
-                "type": "image_to_model",
-                "file": {
-                    "type": "jpg" if "jpg" in image_file.filename.lower() else "png",  # Dynamic type
-                    "file_token": image_token
-                },
-                "model_version": "v2.5-20250123",
-                "texture": True,  # Enable textures
-                "pbr": False  # Disable PBR
+                "image_url": image_data_uri,
+                "enable_pbr": False,
+                "should_remesh": True,
+                "should_texture": True
             }
-            task_response = requests.post(tripo_task_url, headers=HEADERS, json=payload)
-            task_response.raise_for_status()
-            task_data = task_response.json()
-            if task_data.get("code") != 0:
-                app.logger.error(f"Tripo task creation failed: {task_data}")
-                flash(f"Tripo task creation failed: {task_data.get('message', 'Unknown error')}")
+            app.logger.info("Calling Meshy API")
+            response = requests.post("https://api.meshy.ai/openapi/v1/image-to-3d", json=payload, headers=HEADERS, timeout=10)
+            response.raise_for_status()
+            task_data = response.json()
+            task_id = task_data.get("result")
+            if not task_id:
+                app.logger.error(f"No task ID received: {task_data}")
+                flash("Task ID not received from API.")
                 return redirect(url_for('upload'))
-            task_id = task_data["data"]["task_id"]
             app.logger.info(f"Task created: {task_id}")
 
-            # Save task details to database
-            model = Model(user_id=current_user.id,
-                          name=model_name if model_name else None, # <-- Save name
-                          image_url=image_url,
-                          task_id=task_id,
-                          model_url=None)
+            model = Model(user_id=current_user.id, image_url=image_url, task_id=task_id, model_url=None)
             db.session.add(model)
             db.session.commit()
             flash(f"Task key generated: {task_id}")
             return redirect(url_for('models'))
         except requests.RequestException as e:
-            app.logger.error(f"Tripo API error: {str(e)}")
-            flash(f'Tripo API error: {str(e)}')
+            app.logger.error(f"Meshy API error: {str(e)}")
+            flash(f'Meshy API error: {str(e)}')
             return redirect(url_for('upload'))
         except Exception as e:
             app.logger.error(f"Upload error: {str(e)}")
@@ -214,17 +177,15 @@ def upload():
             return redirect(url_for('upload'))
     return render_template('upload.html', form=form)
 
+# ... (Previous imports and setup remain unchanged)
+
 @app.route('/status/<int:model_id>', methods=['GET'])
 @login_required
 def status(model_id):
     model = Model.query.get_or_404(model_id)
     if model.user_id != current_user.id:
         return jsonify({"error": "Unauthorized"}), 403
-
-    if not BUCKET_NAME:
-        app.logger.error("BUCKET_NAME is not set in environment.")
-        return jsonify({"status": "ERROR", "error": "Server misconfiguration: BUCKET_NAME is not set."}), 500
-
+    
     # Step 1: Check if model_url is already set
     if model.model_url:
         app.logger.info(f"Model {model.id} already has model_url: {model.model_url}")
@@ -233,13 +194,14 @@ def status(model_id):
     # Step 2: Check GCS for the model file
     try:
         storage_client = storage.Client()
-        bucket = storage_client.bucket(BUCKET_NAME)
+        bucket = storage_client.bucket(os.environ['BUCKET_NAME'])
         model_filename = f'models/{current_user.id}/{model.id}.glb'
         model_blob = bucket.blob(model_filename)
         if model_blob.exists():
             app.logger.info(f"Model {model.id} found in GCS at {model_filename}")
             try:
-                model.model_url = f"https://storage.googleapis.com/{BUCKET_NAME}/{model_filename}"
+                # Skip make_public() - rely on bucket IAM policy for public access
+                model.model_url = f"https://storage.googleapis.com/{os.environ['BUCKET_NAME']}/{model_filename}"
                 db.session.commit()
                 app.logger.info(f"Updated model {model.id} with model_url: {model.model_url}")
                 return jsonify({"status": "SUCCEEDED", "model_url": model.model_url})
@@ -253,64 +215,62 @@ def status(model_id):
         app.logger.error(f"Error checking GCS for model {model.id}: {str(e)}")
         return jsonify({"status": "ERROR", "error": "Failed to check GCS: " + str(e)}), 500
 
-    # Step 3: If not in GCS, check Tripo API
+    # Step 3: If not in GCS, check Meshy API
     if not model.task_id:
         app.logger.error(f"No task_id for model {model.id}")
         return jsonify({"status": "ERROR", "error": "No task ID available"}), 500
 
     try:
-        app.logger.info(f"Checking Tripo API for task_id: {model.task_id}")
-        task_response = requests.get(f"https://api.tripo3d.ai/v2/openapi/task/{model.task_id}", headers=HEADERS, timeout=15)
+        app.logger.info(f"Checking Meshy API for task_id: {model.task_id}")
+        task_response = requests.get(f"https://api.meshy.ai/openapi/v1/image-to-3d/{model.task_id}", headers=HEADERS, timeout=15)
         task_response.raise_for_status()
         task_status = task_response.json()
-        status = task_status["data"]["status"]
-        progress = task_status["data"].get("progress", 0)
-        app.logger.info(f"Task {model.task_id} status: {status}, Progress: {progress}%, Response: {task_status}")
+        status = task_status.get("status")
+        progress = task_status.get("progress", 0)
+        app.logger.info(f"Task {model.task_id} status: {status}, Progress: {progress}%")
 
-        if status == "success":
-            result = task_status["data"].get("result")
-            if result:
-                # Try "model" first (non-PBR), then "pbr_model" (PBR)
-                glb_url = (result.get("model", {}).get("url") or
-                          result.get("pbr_model", {}).get("url"))
-                if glb_url:
-                    glb_response = requests.get(glb_url, timeout=15)
-                    glb_response.raise_for_status()
-                    model_content = glb_response.content
-                    model_blob.upload_from_string(model_content, content_type='model/gltf-binary')
-                    model.model_url = f"https://storage.googleapis.com/{BUCKET_NAME}/{model_filename}"
-                    db.session.commit()
-                    app.logger.info(f"Model {model.id} uploaded to {model.model_url}")
-                    return jsonify({"status": "SUCCEEDED", "model_url": model.model_url})
-                else:
-                    app.logger.error(f"Task succeeded but no valid model URL in response: {task_status}")
-                    return jsonify({"status": "FAILED", "error": "No GLB URL in response"})
+        if status == "SUCCEEDED":
+            model_urls = task_status.get("model_urls", {})
+            glb_url = model_urls.get("glb")
+            if glb_url:
+                glb_response = requests.get(glb_url, timeout=15)
+                glb_response.raise_for_status()
+                model_content = glb_response.content
+                model_blob.upload_from_string(model_content, content_type='model/gltf-binary')
+                # Skip make_public() - rely on bucket IAM policy
+                model.model_url = f"https://storage.googleapis.com/{os.environ['BUCKET_NAME']}/{model_filename}"
+                db.session.commit()
+                app.logger.info(f"Model {model.id} uploaded to {model.model_url}")
+                return jsonify({"status": "SUCCEEDED", "model_url": model.model_url})
             else:
-                app.logger.error(f"Task succeeded but no 'result' in response: {task_status}")
-                return jsonify({"status": "FAILED", "error": "No result in response"})
-        elif status == "running":
+                app.logger.error("No GLB URL in task response")
+                return jsonify({"status": "FAILED", "error": "No GLB URL"})
+        elif status == "IN_PROGRESS":
             return jsonify({"status": "IN_PROGRESS", "progress": progress})
         else:
-            failure_reason = task_status["data"].get("message", "No failure reason provided")
-            app.logger.error(f"Task failed or canceled: {status}, Reason: {failure_reason}")
-            return jsonify({"status": status, "error": failure_reason})
+            app.logger.error(f"Task failed or canceled: {status}")
+            return jsonify({"status": status})
     except requests.RequestException as e:
         app.logger.error(f"Status check error: {str(e)}, Task ID: {model.task_id}")
+        # Final check: see if the model appeared in GCS
         if model_blob.exists():
-            app.logger.info(f"Model {model.id} found in GCS after Tripo error at {model_filename}")
+            app.logger.info(f"Model {model.id} found in GCS after Meshy error at {model_filename}")
             try:
-                model.model_url = f"https://storage.googleapis.com/{BUCKET_NAME}/{model_filename}"
+                # Skip make_public() - rely on bucket IAM policy
+                model.model_url = f"https://storage.googleapis.com/{os.environ['BUCKET_NAME']}/{model_filename}"
                 db.session.commit()
                 app.logger.info(f"Updated model {model.id} with model_url: {model.model_url}")
                 return jsonify({"status": "SUCCEEDED", "model_url": model.model_url})
             except Exception as e:
                 app.logger.error(f"Failed to update model_url for model {model.id}: {str(e)}")
                 db.session.rollback()
-                return jsonify({"status": "ERROR", "error": "Failed to update model URL after Tripo error"}), 500
-        return jsonify({"status": "ERROR", "error": "Tripo API error: " + str(e)}), 500
+                return jsonify({"status": "ERROR", "error": "Failed to update model URL after Meshy error"}), 500
+        return jsonify({"status": "ERROR", "error": "Meshy API error: " + str(e)}), 500
     except Exception as e:
-        app.logger.error(f"Unexpected error in status: {str(e)}, Task ID: {model.task_id}")
+        app.logger.error(f"Unexpected error in status: {str(e)}")
         return jsonify({"status": "ERROR", "error": "Unexpected error: " + str(e)}), 500
+
+# ... (Rest of the app.py remains unchanged)
 
 @app.route('/models')
 @login_required
@@ -332,7 +292,6 @@ def admin_panel():
             'id': model.id,
             'user_id': model.user_id,
             'username': User.query.get(model.user_id).username if User.query.get(model.user_id) else 'Deleted User',
-            'name': model.name, # <-- Include name
             'image_url': model.image_url,
             'model_url': model.model_url,
             'task_id': model.task_id
@@ -371,25 +330,12 @@ def api_signup():
 @login_required
 def api_get_models():
     models = Model.query.filter_by(user_id=current_user.id).all()
-    model_list = [{'id': m.id, 'name': m.name, 'image_url': m.image_url, 'model_url': m.model_url} for m in models] # <-- Include name
+    model_list = [{'id': m.id, 'image_url': m.image_url, 'model_url': m.model_url} for m in models]
     return jsonify({'success': True, 'models': model_list})
 
 # Initialize database
 with app.app_context():
     db.create_all()
-    # --- Add this block for SQLite quick-fix migration ---
-    import sqlite3
-    db_path = app.config['SQLALCHEMY_DATABASE_URI'].replace('sqlite:///', '')
-    if os.path.exists(db_path):
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-        cursor.execute("PRAGMA table_info(model);")
-        columns = [row[1] for row in cursor.fetchall()]
-        if 'task_id' not in columns:
-            cursor.execute("ALTER TABLE model ADD COLUMN task_id VARCHAR(64);")
-            conn.commit()
-        conn.close()
-    # --- End SQLite quick-fix migration ---
     admin = User.query.filter_by(username='admin').first()
     if not admin:
         admin = User(username='admin', is_admin=True)
@@ -397,9 +343,7 @@ with app.app_context():
         db.session.add(admin)
     else:
         admin.is_admin = True
-        # Ensure password is set/updated if needed (optional, depends on policy)
-        if not admin.check_password('admin123'):
-             admin.set_password('admin123')
+        admin.set_password('admin123')
     db.session.commit()
     app.logger.info("Admin user 'admin' ensured with password 'admin123'")
 
