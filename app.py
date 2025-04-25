@@ -14,8 +14,12 @@ from google.cloud import storage
 import requests
 from werkzeug.middleware.proxy_fix import ProxyFix
 
+from flask_cors import CORS  # <-- Add this import
+
 # Setup Flask app
 app = Flask(__name__)
+CORS(app, resources={r"/api/*": {"origins": "*"}})  # <-- Add this line
+
 # Make sure this is set to a constant value in your environment, not generated randomly
 app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'default-secret-key-for-dev')
 app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', 'sqlite:///app.db')
